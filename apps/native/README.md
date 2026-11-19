@@ -125,7 +125,7 @@ Custom-list reads/mutations use authenticated `customLists.*` procedures and the
 
 The `preview` EAS profile creates an internal build (Android APK); `production` targets stores. Configure `EXPO_PUBLIC_SERVER_URL` to an explicit reachable HTTPS API URL for either profile. Configure `EXPO_PUBLIC_PASSKEY_DOMAIN` to the canonical auth hostname, without scheme or path; iOS adds its webcredentials association while retaining the existing application identity. Expo Go cannot load the optional native passkey module.
 
-On the web auth host configure `PASSKEY_APPLE_TEAM_ID` and comma-separated `PASSKEY_ANDROID_FINGERPRINTS` using the actual signing identities. The public association endpoints remain unavailable until configured. Native and web use `com.movies.app`; do not substitute example signing values. The host must serve both well-known association paths over HTTPS. Native Android origins are derived from those fingerprints by the canonical auth service.
+On the web auth host configure `PASSKEY_APPLE_TEAM_ID` and comma-separated `PASSKEY_ANDROID_FINGERPRINTS` using the actual signing identities. The public association endpoints remain unavailable until configured. Native and web use `com.emmut.movies`; do not substitute example signing values. The host must serve both well-known association paths over HTTPS. Native Android origins are derived from those fingerprints by the canonical auth service.
 
 No EAS project/signing credentials or signed-device acceptance is implied by local exports. Validate account linking, passkey creation/sign-in/deletion, secure-session restart, deep-link return and cancellation on both actual platforms before release. See `docs/native-app-parity.md` for validation evidence and outstanding acceptance.
 
