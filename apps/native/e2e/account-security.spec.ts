@@ -17,6 +17,7 @@ async function model(page: Page, anonymous = false) {
     failDelete: false,
     readCalls: 0,
     deletes: [] as string[],
+    renames: [] as { id: string; name: string }[],
     keys: [
       {
         id: 'key-1',
@@ -68,6 +69,15 @@ async function model(page: Page, anonymous = false) {
     }
     data.keys = data.keys.filter((key) => key.id !== input.id);
     await route.fulfill({ json: { status: true }, headers: corsHeaders });
+  });
+  await page.route('**/api/auth/passkey/update-passkey*', async (route) => {
+    if (await preflight(route)) {
+      return;
+    }
+    const input = route.request().postDataJSON();
+    data.renames.push(input);
+    data.keys = data.keys.map((key) => (key.id === input.id ? { ...key, name: input.name } : key));
+    await route.fulfill({ json: { passkey: data.keys[0] }, headers: corsHeaders });
   });
   return data;
 }
@@ -156,7 +166,7 @@ test('passkey metadata supports confirmed deletion and preserves other settings'
   const data = await model(page);
   await page.goto('/more/settings');
   await expect(page.getByText('My phone', { exact: true })).toBeVisible();
-  await expect(page.getByText('multiDevice · Created: 2 Jan 2026', { exact: true })).toBeVisible();
+  await expect(page.getByText('Synced · Created: 2 Jan 2026', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Delete passkey My phone', exact: true }).click();
   await page.getByRole('button', { name: 'Cancel Delete Passkey', exact: true }).click();
   expect(data.deletes).toEqual([]);
@@ -207,18 +217,29 @@ test('unsupported authenticators retain management and explain unavailable creat
     page.getByRole('button', { name: 'Delete passkey My phone', exact: true }),
   ).toBeVisible();
 });
-test('adding a passkey validates the draft and treats device cancellation as recoverable', async ({
-  page,
-}) => {
-  await model(page);
-  await page.addInitScript(() => {
+test('renaming a passkey validates and saves the trimmed name', async ({ page }) => {
+  const data = await model(page);
+  await page.goto('/more/settings');
+  await page.getByRole('button', { name: 'Rename passkey My phone', exact: true }).click();
+  const field = page.getByRole('textbox', { name: 'Passkey Name', exact: true });
+  await expect(field).toHaveValue('My phone');
+  await field.fill(' ');
+  await page.getByRole('button', { name: 'Confirm Rename Passkey', exact: true }).click();
+  await expect(page.getByText('Please enter a name for your passkey.')).toBeVisible();
+  await field.fill(' Work phone ');
+  await page.getByRole('button', { name: 'Confirm Rename Passkey', exact: true }).click();
+  await expect(page.getByText('Work phone', { exact: true })).toBeVisible();
+  expect(data.renames).toEqual([{ id: 'key-1', name: 'Work phone' }]);
+});
+async function mockRegistrationPrompt(page: Page, errorName: string) {
+  await page.addInitScript((name: string) => {
     Object.defineProperty(navigator.credentials, 'create', {
       value: async () => {
-        throw new DOMException('cancelled', 'NotAllowedError');
+        throw new DOMException('prompt failed', name);
       },
       configurable: true,
     });
-  });
+  }, errorName);
   await page.route('**/api/auth/passkey/generate-register-options*', async (route) => {
     if (await preflight(route)) {
       return;
@@ -233,6 +254,13 @@ test('adding a passkey validates the draft and treats device cancellation as rec
       headers: corsHeaders,
     });
   });
+}
+
+test('adding a passkey validates the draft and treats device cancellation as recoverable', async ({
+  page,
+}) => {
+  await model(page);
+  await mockRegistrationPrompt(page, 'NotAllowedError');
   await page.goto('/more/settings');
   await page.getByRole('button', { name: 'Add Passkey', exact: true }).click();
   await page.getByRole('textbox', { name: 'Passkey Name', exact: true }).fill(' ');
@@ -243,9 +271,25 @@ test('adding a passkey validates the draft and treats device cancellation as rec
   await expect(page.getByRole('textbox', { name: 'Passkey Name', exact: true })).toHaveValue(
     'My laptop',
   );
-  await expect(page.getByRole('alert')).toContainText(/cancelled|Couldn’t add/);
+  // A prompt the user dismissed needs no message; the sheet stays open to retry.
+  await expect(page.getByRole('alert')).not.toBeAttached();
+  await expect(
+    page.getByRole('button', { name: 'Confirm Add Passkey', exact: true }),
+  ).toBeEnabled();
   await page.getByRole('button', { name: 'Cancel Add Passkey' }).click();
 });
+test('passkey security failures remain visible and can be retried', async ({ page }) => {
+  await model(page);
+  await mockRegistrationPrompt(page, 'SecurityError');
+  await page.goto('/more/settings');
+  await page.getByRole('button', { name: 'Add Passkey', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm Add Passkey', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('Failed to add passkey. Please try again.');
+  await expect(
+    page.getByRole('button', { name: 'Confirm Add Passkey', exact: true }),
+  ).toBeEnabled();
+});
+
 for (const colorScheme of ['light', 'dark'] as const) {
   test(`security cards match the settings hierarchy in ${colorScheme}`, async ({ page }) => {
     await page.emulateMedia({ colorScheme });
@@ -261,3 +305,21 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.screenshot({ path: `/tmp/pr350-native-add-passkey-${colorScheme}.png` });
   });
 }
+
+test('passkeys refresh through the query when settings regains focus', async ({ page }) => {
+  const data = await model(page);
+  await page.goto('/more/settings');
+  await expect(page.getByText('My phone', { exact: true })).toBeVisible();
+  const reads = data.readCalls;
+  await page
+    .getByTestId('bottom-navigation')
+    .getByRole('button', { name: 'Search', exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/search$/);
+  data.keys = [{ ...data.keys[0], id: 'key-2', name: 'Added on another device' }];
+  await page.goBack();
+  await expect(page).toHaveURL(/\/more\/settings$/);
+  await expect(page.getByText('Added on another device', { exact: true })).toBeVisible();
+  await expect(page.getByText('My phone', { exact: true })).not.toBeAttached();
+  expect(data.readCalls).toBeGreaterThan(reads);
+});

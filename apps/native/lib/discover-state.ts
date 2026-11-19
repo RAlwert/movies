@@ -9,16 +9,24 @@ import {
   type SearchParams as Params,
 } from '@native/lib/search-params';
 
-function ids(value: Params[string], maxSelections = 50) {
-  return [
-    ...new Set(
-      (scalar(value) ?? '')
-        .split(/[|,]/)
-        .map(Number)
-        .filter((id) => Number.isSafeInteger(id) && id > 0),
-    ),
-  ].slice(0, maxSelections);
+const MAX_SELECTIONS = 50;
+
+/** URL lists accept `|` or `,` separators. */
+function listValues(value: Params[string]) {
+  return (scalar(value) ?? '').split(/[|,]/);
 }
+
+function isPositiveId(id: number) {
+  return Number.isSafeInteger(id) && id > 0;
+}
+
+function ids(value: Params[string]) {
+  const parsedIds = listValues(value).map(Number);
+  const validIds = parsedIds.filter(isPositiveId);
+  const uniqueIds = [...new Set(validIds)];
+  return uniqueIds.slice(0, MAX_SELECTIONS);
+}
+
 function boundedInteger(value: Params[string], max: number) {
   const number = Number(scalar(value));
   if (!Number.isInteger(number)) {
@@ -29,13 +37,20 @@ function boundedInteger(value: Params[string], max: number) {
   }
   return number;
 }
+
 function sortForType(type: 'movie' | 'tv', value: Params[string]) {
   const options = type === 'movie' ? MOVIE_SORT_OPTIONS : TV_SORT_OPTIONS;
-  return options.find((option) => option.value === scalar(value))?.value ?? 'popularity.desc';
+  const requestedSort = scalar(value);
+  const selectedOption = options.find((option) => option.value === requestedSort);
+  return selectedOption?.value ?? 'popularity.desc';
 }
+
 function countryCodes(value: Params[string]) {
-  return sanitizeOriginCountryCodes((scalar(value) ?? '').split(/[|,]/)).slice(0, 50);
+  const requestedCountries = listValues(value);
+  const supportedCountries = sanitizeOriginCountryCodes(requestedCountries);
+  return supportedCountries.slice(0, MAX_SELECTIONS);
 }
+
 export function readDiscoverState(
   params: Params,
   region: string,
@@ -66,6 +81,7 @@ export function readDiscoverState(
     originCountries: countryCodes(params.with_origin_country),
   });
 }
+
 export function toggleSelection(values: string[], value: string, maxSelections?: number) {
   if (values.includes(value)) {
     return values.filter((entry) => entry !== value);

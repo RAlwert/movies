@@ -1,13 +1,14 @@
 import type { CustomListSummary } from '@movies/api/custom-lists';
-import { createListSchema } from '@movies/api/validations';
+import {
+  useCustomListsCreateMutation,
+  useCustomListsUpdateMutation,
+} from '@movies/api/react/use-custom-lists-query';
+import { createListSchema, type CreateListData } from '@movies/api/validations';
 import { EMOJI_OPTIONS } from '@movies/config/constants';
-import { orpc } from '@native/lib/api';
-import { refreshCustomLists } from '@native/lib/custom-lists';
-import { useMutation } from '@tanstack/react-query';
+import { Sheet } from '@native/components/sheet';
 import { useState } from 'react';
 import {
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -17,6 +18,7 @@ import {
 } from 'react-native';
 import { SafeAreaView as NativeSafeAreaView } from 'react-native-safe-area-context';
 import { withUniwind } from 'uniwind';
+
 const SafeAreaView = withUniwind(NativeSafeAreaView);
 
 export function CustomListForm({
@@ -35,21 +37,7 @@ export function CustomListForm({
   const [description, setDescription] = useState(initial.description);
   const [emoji, setEmoji] = useState(initial.emoji);
   const [validation, setValidation] = useState<string | null>(null);
-  async function saved() {
-    await refreshCustomLists(userId);
-    close();
-  }
-  const create = useMutation(
-    orpc.customLists.create.mutationOptions({
-      async onSuccess(result) {
-        await saved();
-        created?.(result.listId);
-      },
-    }),
-  );
-  const update = useMutation(orpc.customLists.update.mutationOptions({ onSuccess: saved }));
-  const pending = create.isPending || update.isPending;
-  const failed = create.isError || update.isError;
+  const { pending, failed, save } = useListSave({ userId, item, close, created });
   function dismiss() {
     if (!pending) {
       close();
@@ -62,16 +50,14 @@ export function CustomListForm({
       return;
     }
     setValidation(null);
-    if (item) {
-      update.mutate({ ...parsed.data, listId: item.id });
-    } else {
-      create.mutate(parsed.data);
-    }
+    save(parsed.data);
   }
-  const title = item ? 'Edit List' : 'Create New List';
-  const submitLabel = item ? 'Save Changes' : 'Create List';
+
+  const { title, submitLabel } = item
+    ? { title: 'Edit List', submitLabel: 'Save Changes' }
+    : { title: 'Create New List', submitLabel: 'Create List' };
   return (
-    <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={dismiss}>
+    <Sheet visible onRequestClose={dismiss}>
       <SafeAreaView className="flex-1 bg-background">
         <KeyboardAvoidingView
           className="flex-1"
@@ -82,7 +68,7 @@ export function CustomListForm({
             keyboardShouldPersistTaps="handled"
           >
             <View className="flex-row items-center justify-between gap-3">
-              <Text accessibilityRole="header" className="text-xl font-bold text-foreground">
+              <Text accessibilityRole="header" className="flex-1 text-xl font-bold text-foreground">
                 {title}
               </Text>
               <Pressable
@@ -137,7 +123,7 @@ export function CustomListForm({
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
-    </Modal>
+    </Sheet>
   );
 }
 
@@ -164,23 +150,24 @@ function EmojiPicker({
         nestedScrollEnabled
         keyboardShouldPersistTaps="handled"
       >
-        {EMOJI_OPTIONS.map((option) => (
-          <Pressable
-            key={option}
-            accessibilityRole="radio"
-            accessibilityLabel={'Emoji ' + option}
-            accessibilityState={{ checked: emoji === option, disabled: pending }}
-            aria-checked={emoji === option}
-            disabled={pending}
-            onPress={() => setEmoji(option)}
-            className={
-              'min-h-12 min-w-12 items-center justify-center rounded-lg ' +
-              (emoji === option ? 'bg-foreground' : 'bg-default')
-            }
-          >
-            <Text className="text-2xl">{option}</Text>
-          </Pressable>
-        ))}
+        {EMOJI_OPTIONS.map((option) => {
+          const checked = emoji === option;
+          const background = checked ? 'bg-foreground' : 'bg-default';
+          return (
+            <Pressable
+              key={option}
+              accessibilityRole="radio"
+              accessibilityLabel={'Emoji ' + option}
+              accessibilityState={{ checked, disabled: pending }}
+              aria-checked={checked}
+              disabled={pending}
+              onPress={() => setEmoji(option)}
+              className={'min-h-12 min-w-12 items-center justify-center rounded-lg ' + background}
+            >
+              <Text className="text-2xl">{option}</Text>
+            </Pressable>
+          );
+        })}
       </ScrollView>
       <Text className="text-foreground/75">Selected: {emoji}</Text>
     </>
@@ -195,4 +182,40 @@ function FormError({ validation, failed }: { validation: string | null; failed: 
       {validation ?? 'Couldn’t save your list. Please try again.'}
     </Text>
   );
+}
+
+function useListSave({
+  userId,
+  item,
+  close,
+  created,
+}: {
+  userId: string;
+  item?: CustomListSummary;
+  close: () => void;
+  created?: (id: string) => void;
+}) {
+  const create = useCustomListsCreateMutation({
+    accountId: userId,
+    onSuccess(result) {
+      close();
+      created?.(result.listId);
+    },
+  });
+  const update = useCustomListsUpdateMutation({
+    accountId: userId,
+    onSuccess() {
+      close();
+    },
+  });
+  const pending = create.isPending || update.isPending;
+  const failed = create.isError || update.isError;
+  function save(input: CreateListData) {
+    if (item) {
+      update.mutate({ ...input, listId: item.id });
+    } else {
+      create.mutate(input);
+    }
+  }
+  return { pending, failed, save };
 }

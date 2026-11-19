@@ -10,6 +10,8 @@ const state = vi.hoisted(() => ({
   providers: [] as number[],
   isError: false,
   isLoading: false,
+  isPlaceholderData: false,
+  unavailableItems: 0,
   effects: [] as (() => void)[],
   setUrlState: vi.fn(),
   reorder: vi.fn(),
@@ -36,18 +38,36 @@ vi.mock('nuqs', () => {
     ],
   };
 });
-vi.mock('@tanstack/react-query', () => ({
-  useQuery: ({ queryKey }: { queryKey: string[] }) => ({
-    data: queryKey.includes('counts')
-      ? 20
-      : {
-          items: [{ listItemId: 'first-movie' }],
-          currentPage: state.currentPage,
-          totalPages: state.totalPages,
+vi.mock('@movies/api/react/use-system-lists-query', () => ({
+  useSystemListsPage: () => ({
+    data: {
+      items: [
+        {
+          id: 42,
+          type: 'movie',
+          title: 'Movie',
+          posterUrl: null,
+          backdropUrl: null,
+          releaseDate: '',
+          rating: 0,
+          listItemId: 'first-movie',
         },
+      ],
+      counts: { movie: 20, tv: 20 },
+      totalItems: 20,
+      unavailableItems: state.unavailableItems,
+      currentPage: state.currentPage,
+      totalPages: state.totalPages,
+    },
     isLoading: state.isLoading,
+    isFetching: false,
+    refetch: vi.fn(),
+    isPlaceholderData: state.isPlaceholderData,
     isError: state.isError,
   }),
+  useSystemListsMoveMutation: () => ({ mutateAsync: vi.fn() }),
+}));
+vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 vi.mock('@/hooks/use-reorderable-items', () => ({
@@ -55,11 +75,6 @@ vi.mock('@/hooks/use-reorderable-items', () => ({
     state.reorder(offset);
     return { localItems: items, isPending: false, move: vi.fn() };
   },
-}));
-vi.mock('@/lib/lists', () => ({ moveListItem: vi.fn() }));
-vi.mock('@/lib/system-list-queries', () => ({
-  getSystemListCount: vi.fn(),
-  getSystemListWithResourceDetailsPaginated: vi.fn(),
 }));
 vi.mock('@/components/list-items-grid', () => ({
   ListItemsGrid: ({ offset, editing }: { offset: number; editing: boolean }) => (
@@ -90,6 +105,8 @@ beforeEach(() => {
     providers: [],
     isError: false,
     isLoading: false,
+    isPlaceholderData: false,
+    unavailableItems: 0,
     effects: [],
   });
 });
@@ -133,5 +150,25 @@ describe('system-list page reconciliation', () => {
     renderContent();
     for (const effect of state.effects) effect();
     expect(state.setUrlState).not.toHaveBeenCalled();
+  });
+});
+
+describe('system-list loading guards', () => {
+  it('preserves the requested page while the previous page is a placeholder', () => {
+    state.totalPages = 2;
+    state.isPlaceholderData = true;
+    renderContent();
+    for (const effect of state.effects) effect();
+    expect(state.setUrlState).not.toHaveBeenCalled();
+  });
+  it('blocks moves during a media change with the same page number', () => {
+    state.page = 1;
+    state.isPlaceholderData = true;
+    expect(renderContent()).toMatch(/<button disabled="">Reorder items<\/button>/);
+  });
+  it('blocks moves when missing titles would make display offsets inaccurate', () => {
+    state.page = 1;
+    state.unavailableItems = 1;
+    expect(renderContent()).toMatch(/<button disabled="">Reorder items<\/button>/);
   });
 });

@@ -1,14 +1,15 @@
+import { varlockNextConfigPlugin } from '@varlock/nextjs-integration/plugin';
 import type { NextConfig } from 'next';
-
-import { env } from './src/env.ts';
-
-// eslint-disable-next-line @typescript-eslint/no-unused-expressions
-env;
 
 const nextConfig: NextConfig = {
   transpilePackages: ['@movies/ui', '@movies/db', '@movies/config', '@movies/auth', '@movies/api'],
   reactCompiler: true,
   cacheComponents: true,
+  experimental: {
+    // Retain visited dynamic page segments for quick Link return navigation.
+    // Data cache lifetimes alone do not retain the complete route payload.
+    staleTimes: { dynamic: 60 },
+  },
   // Preserve the existing Cache Components prefetch behavior during this upgrade.
   partialPrefetching: false,
   async headers() {
@@ -38,4 +39,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default varlockNextConfigPlugin()(nextConfig);

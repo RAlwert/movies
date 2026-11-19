@@ -9,6 +9,7 @@ export function registerScrollCapture(capture: () => void) {
     }
   };
 }
+
 export function captureActiveScroll() {
   activeCapture?.();
 }

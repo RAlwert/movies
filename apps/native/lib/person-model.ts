@@ -8,6 +8,7 @@ function year(date: string | null) {
   const value = new Date(date).getFullYear();
   return Number.isFinite(value) ? value : null;
 }
+
 export function personStats(
   person: PersonDetail,
   credits: number | undefined,
@@ -33,6 +34,7 @@ export function personStats(
   }
   return stats;
 }
+
 export function personFacts(person: PersonDetail) {
   const facts = [
     { label: 'Known for', value: person.department },

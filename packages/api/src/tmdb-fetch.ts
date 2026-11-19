@@ -1,4 +1,4 @@
-// Framework-independent transport shared by the Hono host, web app, and title-sync job.
+// Framework-independent upstream transport used by Hono and offline title-sync jobs.
 // Each consumer binds its own access token with createTmdbFetch.
 
 type TmdbSearchParams = Record<string, string | number | undefined>;
@@ -48,7 +48,7 @@ const MAX_RETRY_AFTER_MS = REQUEST_TIMEOUT_MS;
 // page. Once a retry wait would cross this deadline we surface what we have.
 const RETRY_BUDGET_MS = 2 * REQUEST_TIMEOUT_MS;
 
-function sleep(ms: number) {
+function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
@@ -66,7 +66,10 @@ function retryAfterMs(res: Response): number | null {
     return Math.max(0, seconds * 1000);
   }
   const date = Date.parse(header);
-  return Number.isNaN(date) ? null : Math.max(0, date - Date.now());
+  if (Number.isNaN(date)) {
+    return null;
+  }
+  return Math.max(0, date - Date.now());
 }
 
 /**

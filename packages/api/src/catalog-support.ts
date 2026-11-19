@@ -44,6 +44,7 @@ export function pickYoutubeTrailer(videos: Pick<TmdbVideo, 'key' | 'site' | 'typ
   });
   return video?.key ?? null;
 }
+
 export function trailerEmbedUrl(key: string) {
   const safeKey = youtubeKeySchema.parse(key);
   return `https://www.youtube.com/embed/${safeKey}?autoplay=1&playsinline=1`;
@@ -57,6 +58,7 @@ const watchProviderSchema = z.object({
 export const providerGroupsSchema = z.object({
   link: z.string().url(),
   free: z.array(watchProviderSchema),
+  ads: z.array(watchProviderSchema).default([]),
   streaming: z.array(watchProviderSchema),
   rent: z.array(watchProviderSchema),
   buy: z.array(watchProviderSchema),
@@ -64,3 +66,12 @@ export const providerGroupsSchema = z.object({
 export type ProviderGroups = z.infer<typeof providerGroupsSchema>;
 export type WatchProviderCard = z.infer<typeof watchProviderSchema>;
 export const relatedTitlesSchema = z.array(mediaCardSchema);
+
+export const directWatchLinksSchema = z.array(
+  z.object({
+    providerId: z.number().int().positive(),
+    regions: z.array(z.string()).optional(),
+    types: z.array(z.enum(['flatrate', 'rent', 'buy', 'free', 'ads'])),
+    url: z.string().url(),
+  }),
+);

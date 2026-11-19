@@ -11,13 +11,14 @@ import { invalidateAccountQueriesOnReturn } from '@/lib/query-invalidation';
 export function PreferenceRefresh() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  useEffect(
-    () =>
-      subscribeToPreferenceRefresh(() => {
-        router.refresh();
-        void invalidateAccountQueriesOnReturn(queryClient);
-      }),
-    [router, queryClient],
-  );
+
+  useEffect(() => {
+    const unsubscribe = subscribeToPreferenceRefresh(() => {
+      router.refresh();
+      void invalidateAccountQueriesOnReturn(queryClient);
+    });
+    return unsubscribe;
+  }, [router, queryClient]);
+
   return null;
 }

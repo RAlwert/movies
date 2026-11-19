@@ -1,20 +1,52 @@
 import { parseCatalogId } from '@movies/api/catalog';
-import type { SeasonPage } from '@movies/api/pdp';
+import { seasonNumberParam, type SeasonPage } from '@movies/api/pdp';
+import { useCatalogSeason } from '@movies/api/react/use-catalog-query';
 import { BottomNavigation } from '@native/components/bottom-navigation';
 import { CatalogSectionState } from '@native/components/catalog-section-state';
 import { PdpImage } from '@native/components/pdp-image';
-import { orpc } from '@native/lib/api';
-import { useQuery } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView as NativeSafeAreaView } from 'react-native-safe-area-context';
 import { withUniwind } from 'uniwind';
+
 const SafeAreaView = withUniwind(NativeSafeAreaView);
+
+type Episode = SeasonPage['episodes'][number];
+
+function toggleId(ids: number[], id: number) {
+  if (ids.includes(id)) {
+    return ids.filter((value) => value !== id);
+  }
+  return [...ids, id];
+}
+
+function ratingLabel(episode: Episode) {
+  if (episode.vote_count === 0) {
+    return 'Not yet rated';
+  }
+  return episode.vote_average.toFixed(1) + '/10 (' + episode.vote_count + ' votes)';
+}
+
 function Episodes({ data }: { data: SeasonPage }) {
-  const [revealed, setRevealed] = useState<number[]>([]);
-  const all =
-    data.episodes.length > 0 && data.episodes.every((episode) => revealed.includes(episode.id));
+  const [revealedEpisodeIds, setRevealedEpisodeIds] = useState<number[]>([]);
+  const allEpisodesRevealed =
+    data.episodes.length > 0 &&
+    data.episodes.every((episode) => revealedEpisodeIds.includes(episode.id));
+  function toggleEpisode(episodeId: number) {
+    setRevealedEpisodeIds((currentIds) => toggleId(currentIds, episodeId));
+  }
+
+  function toggleAllEpisodes() {
+    if (allEpisodesRevealed) {
+      setRevealedEpisodeIds([]);
+      return;
+    }
+
+    const episodeIds = data.episodes.map((episode) => episode.id);
+    setRevealedEpisodeIds(episodeIds);
+  }
+
   return (
     <View className="gap-6">
       <View className="bg-default gap-3 rounded-2xl border border-border p-6">
@@ -34,74 +66,30 @@ function Episodes({ data }: { data: SeasonPage }) {
       </Text>
       <Pressable
         accessibilityRole="button"
-        onPress={() => setRevealed(all ? [] : data.episodes.map((episode) => episode.id))}
+        onPress={toggleAllEpisodes}
         className="bg-default min-h-11 justify-center self-start rounded-lg border border-border px-4"
       >
         <Text className="font-semibold text-foreground">
-          {all ? 'Hide spoilers' : 'Show spoilers'}
+          {allEpisodesRevealed ? 'Hide spoilers' : 'Show spoilers'}
         </Text>
       </Pressable>
-      {!data.episodes.length ? <Text className="text-muted">No episodes available.</Text> : null}
-      {data.episodes.map((episode) => {
-        const visible = revealed.includes(episode.id);
-        return (
-          <View
-            key={episode.id}
-            className="overflow-hidden rounded-xl border border-border bg-background"
-          >
-            <View className="bg-default aspect-video items-center justify-center">
-              {visible ? (
-                <PdpImage path={episode.still_path} title={episode.name} />
-              ) : (
-                <Text className="text-muted">Episode details hidden</Text>
-              )}
-            </View>
-            <View className="gap-3 p-4">
-              <Text className="text-xs text-muted">{episode.air_date || 'Air date TBA'}</Text>
-              <Text accessibilityRole="header" className="text-lg font-semibold text-foreground">
-                {visible ? episode.name : 'Episode ' + episode.episode_number}
-              </Text>
-              <View className="flex-row flex-wrap gap-3">
-                {episode.runtime ? (
-                  <Text className="text-xs text-muted">{episode.runtime} min</Text>
-                ) : null}
-                <Text className="text-xs text-muted">
-                  {episode.vote_count > 0
-                    ? episode.vote_average.toFixed(1) + '/10 (' + episode.vote_count + ' votes)'
-                    : 'Not yet rated'}
-                </Text>
-              </View>
-              {visible ? (
-                <Text className="text-base leading-6 text-foreground">
-                  {episode.overview || 'No overview available.'}
-                </Text>
-              ) : null}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={
-                  (visible ? 'Hide' : 'Reveal') + ' episode ' + episode.episode_number
-                }
-                accessibilityState={{ expanded: visible }}
-                onPress={() =>
-                  setRevealed((ids) =>
-                    visible ? ids.filter((id) => id !== episode.id) : [...ids, episode.id],
-                  )
-                }
-                className="bg-default min-h-11 justify-center self-start rounded-lg px-4"
-              >
-                <Text className="font-semibold text-foreground">
-                  {visible ? 'Hide details' : 'Reveal details'}
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-        );
-      })}
+      {data.episodes.length === 0 ? (
+        <Text className="text-muted">No episodes available.</Text>
+      ) : null}
+      {data.episodes.map((episode) => (
+        <EpisodeCard
+          key={episode.id}
+          episode={episode}
+          visible={revealedEpisodeIds.includes(episode.id)}
+          toggle={() => toggleEpisode(episode.id)}
+        />
+      ))}
     </View>
   );
 }
+
 function SeasonQuery({ id, season }: { id: number; season: number }) {
-  const query = useQuery(orpc.catalog.season.queryOptions({ input: { id, season }, retry: false }));
+  const query = useCatalogSeason({ id, season });
   return (
     <ScrollView
       contentInsetAdjustmentBehavior="automatic"
@@ -124,21 +112,88 @@ function SeasonQuery({ id, season }: { id: number; season: number }) {
     </ScrollView>
   );
 }
+
 export function SeasonScreen() {
   const params = useLocalSearchParams<{ id?: string; type?: string; season?: string }>();
   const id = parseCatalogId(params.id);
-  const validSeason =
-    typeof params.season === 'string' &&
-    /^(0|[1-9]\d*)$/.test(params.season) &&
-    Number(params.season) <= 10000;
+  const season = seasonNumberParam.safeParse(params.season);
+
   return (
     <SafeAreaView className="flex-1 bg-background" edges={['left', 'right']}>
-      {id && params.type === 'tv' && validSeason ? (
-        <SeasonQuery id={id} season={Number(params.season)} />
+      {id && params.type === 'tv' && season.success ? (
+        <SeasonQuery id={id} season={season.data} />
       ) : (
         <Text className="p-5 text-foreground">Season not found.</Text>
       )}
       <BottomNavigation />
     </SafeAreaView>
+  );
+}
+
+function EpisodeCard({
+  episode,
+  visible,
+  toggle,
+}: {
+  episode: Episode;
+  visible: boolean;
+  toggle: () => void;
+}) {
+  const action = visible ? 'Hide' : 'Reveal';
+  return (
+    <View className="overflow-hidden rounded-xl border border-border bg-background">
+      <View className="bg-default aspect-video items-center justify-center">
+        {visible ? (
+          <PdpImage path={episode.still_path} title={episode.name} />
+        ) : (
+          <Text className="text-muted">Episode details hidden</Text>
+        )}
+      </View>
+      <View className="gap-3 p-4">
+        <EpisodeHeading episode={episode} visible={visible} />
+        <EpisodeStats episode={episode} />
+        <EpisodeOverview episode={episode} visible={visible} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={action + ' episode ' + episode.episode_number}
+          accessibilityState={{ expanded: visible }}
+          onPress={toggle}
+          className="bg-default min-h-11 justify-center self-start rounded-lg px-4"
+        >
+          <Text className="font-semibold text-foreground">{action + ' details'}</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function EpisodeHeading({ episode, visible }: { episode: Episode; visible: boolean }) {
+  return (
+    <>
+      <Text className="text-xs text-muted">{episode.air_date || 'Air date TBA'}</Text>
+      <Text accessibilityRole="header" className="text-lg font-semibold text-foreground">
+        {visible ? episode.name : 'Episode ' + episode.episode_number}
+      </Text>
+    </>
+  );
+}
+
+function EpisodeStats({ episode }: { episode: Episode }) {
+  return (
+    <View className="flex-row flex-wrap gap-3">
+      {episode.runtime ? <Text className="text-xs text-muted">{episode.runtime} min</Text> : null}
+      <Text className="text-xs text-muted">{ratingLabel(episode)}</Text>
+    </View>
+  );
+}
+
+function EpisodeOverview({ episode, visible }: { episode: Episode; visible: boolean }) {
+  if (!visible) {
+    return null;
+  }
+  return (
+    <Text className="text-base leading-6 text-foreground">
+      {episode.overview || 'No overview available.'}
+    </Text>
   );
 }

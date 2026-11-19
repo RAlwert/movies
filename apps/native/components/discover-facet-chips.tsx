@@ -1,30 +1,35 @@
 import type { DiscoveryInput } from '@movies/api/discover';
+import { useDiscoveryFacets } from '@movies/api/react/use-discovery-query';
 import { XIcon } from '@native/components/icons';
-import { orpc } from '@native/lib/api';
 import { facetFilters } from '@native/lib/discover-filters';
-import { useQuery } from '@tanstack/react-query';
 import { Pressable, ScrollView, Text, View } from 'react-native';
+
+type Facet = (typeof facetFilters)[keyof typeof facetFilters];
+
+function facetName(facet: Facet, id: number, names: { id: number; name: string }[] = []) {
+  const match = names.find((item) => item.id === id);
+  if (match) {
+    return match.name;
+  }
+  return `${facet.kind} ${id}`;
+}
 
 function FacetChips({
   filter,
+  facet,
   ids,
   change,
 }: {
-  filter: keyof typeof facetFilters;
+  filter: string;
+  facet: Facet;
   ids: number[];
   change: (params: Record<string, string>) => void;
 }) {
-  const facet = facetFilters[filter];
-  const query = useQuery(
-    orpc.discovery.facets.queryOptions({
-      input: { kind: facet.kind, ids, query: '' },
-      retry: false,
-    }),
-  );
+  const query = useDiscoveryFacets({ kind: facet.kind, ids, query: '' });
   return (
     <View className="flex-row gap-2">
       {ids.map((id) => {
-        const name = query.data?.find((item) => item.id === id)?.name ?? `${facet.kind} ${id}`;
+        const name = facetName(facet, id, query.data);
         return (
           <Pressable
             key={id}
@@ -53,11 +58,12 @@ export function DiscoverFacetChips({
 }) {
   return (
     <ScrollView horizontal contentContainerClassName="gap-2" showsHorizontalScrollIndicator={false}>
-      {(Object.keys(facetFilters) as (keyof typeof facetFilters)[]).map((filter) => {
-        const ids = input[facetFilters[filter].field];
-        return ids.length ? (
-          <FacetChips key={filter} filter={filter} ids={ids} change={change} />
-        ) : null;
+      {Object.entries(facetFilters).map(([filter, facet]) => {
+        const ids = input[facet.field];
+        if (ids.length === 0) {
+          return null;
+        }
+        return <FacetChips key={filter} filter={filter} facet={facet} ids={ids} change={change} />;
       })}
     </ScrollView>
   );

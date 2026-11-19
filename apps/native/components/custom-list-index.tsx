@@ -1,16 +1,18 @@
 import type { CustomListSummary } from '@movies/api/custom-lists';
+import {
+  useCustomListsMoveMutation,
+  useCustomListsIndex,
+} from '@movies/api/react/use-custom-lists-query';
 import { AccountScreen } from '@native/components/account-screen';
+import { CatalogPagination } from '@native/components/catalog-pagination';
 import { CustomListDialogs } from '@native/components/custom-list-dialogs';
 import { CustomListScroll } from '@native/components/custom-list-scroll';
-import { ListMoveControls, ListPageControls } from '@native/components/list-controls';
+import { ListMoveControls } from '@native/components/list-controls';
+import { ListMutationError } from '@native/components/list-mutation-error';
 import { ScreenQueryState } from '@native/components/screen-query-state';
 import { useScrollNavigation } from '@native/components/scroll-navigation';
-import { accountQueryKey } from '@native/lib/account-query-key';
-import { orpc } from '@native/lib/api';
-import { refreshCustomLists } from '@native/lib/custom-lists';
 import { listPage } from '@native/lib/list-page-state';
 import { useCanonicalListPage } from '@native/lib/use-canonical-list-page';
-import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
@@ -82,18 +84,11 @@ function ListIndex({ userId }: { userId: string }) {
   const params = useLocalSearchParams();
   const router = useRouter();
   const page = listPage(params.page);
-  const input = { page };
   const [editor, setEditor] = useState<CustomListSummary | 'create' | null>(null);
   const [deleting, setDeleting] = useState<CustomListSummary | null>(null);
   const [reordering, setReordering] = useState(false);
-  const query = useQuery({
-    ...orpc.customLists.index.queryOptions({ input, retry: false }),
-    queryKey: accountQueryKey(orpc.customLists.index.queryKey({ input }), userId),
-    placeholderData: keepPreviousData,
-  });
-  const move = useMutation(
-    orpc.customLists.move.mutationOptions({ onSuccess: () => refreshCustomLists(userId) }),
-  );
+  const query = useCustomListsIndex(userId, { page });
+  const move = useCustomListsMoveMutation({ accountId: userId });
   useCanonicalListPage(query, page);
   if (!query.data || query.isError) {
     return (
@@ -119,11 +114,7 @@ function ListIndex({ userId }: { userId: string }) {
           create={() => setEditor('create')}
           toggleReorder={() => setReordering(!reordering)}
         />
-        {move.isError ? (
-          <Text accessibilityRole="alert" className="text-red-600 dark:text-red-400">
-            Couldn’t reorder your lists. Please try again.
-          </Text>
-        ) : null}
+        <ListMutationError failed={move.isError} action="reorder your lists" />
         <IndexRows
           items={result.lists}
           order={{ offset, total: result.totalItems, pending: blocked, enabled: reordering }}
@@ -132,11 +123,11 @@ function ListIndex({ userId }: { userId: string }) {
           move={(item, position) => move.mutate({ listId: item.id, position })}
         />
         <IndexEmpty total={result.totalItems} />
-        <ListPageControls
+        <CatalogPagination
           page={result.currentPage}
-          pages={result.totalPages}
-          blocked={blocked}
-          change={(value) => router.setParams({ page: String(value) })}
+          totalPages={result.totalPages}
+          disabled={blocked}
+          onChange={(value) => router.setParams({ page: String(value) })}
         />
       </CustomListScroll>
       <CustomListDialogs

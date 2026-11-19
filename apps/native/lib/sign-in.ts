@@ -9,6 +9,7 @@ function authCallback(path: string) {
   }
   return path;
 }
+
 type SocialProvider = 'discord' | 'github';
 async function socialSignIn(
   provider: SocialProvider,
@@ -21,6 +22,7 @@ async function socialSignIn(
     errorCallbackURL: authCallback(errorDestination),
   });
 }
+
 async function signIn(method: SignInMethod, destination: string) {
   if (method === 'anonymous') {
     return authClient.signIn.anonymous();
@@ -30,10 +32,12 @@ async function signIn(method: SignInMethod, destination: string) {
   }
   return socialSignIn(method, destination, '/login?error=failed_to_login');
 }
+
 async function currentUser() {
   const result = await authClient.getSession({ query: { disableCookieCache: true } });
   return result.data?.user ?? null;
 }
+
 export const runSignIn = createSignInFlow({ signIn, current: currentUser });
 export const runAccountLink = createSignInFlow<SocialProvider>(
   {

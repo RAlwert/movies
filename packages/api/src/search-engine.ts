@@ -228,24 +228,32 @@ export function createSearchEngine(sources: SearchSources) {
     { parsed, mediaType, page, limit, mode }: IndexOptions<M>,
   ): Promise<SearchPage<T | IndexHit<M>>> {
     const { title } = parsed;
-    const merge = mode === 'merge' && parsed.year === undefined;
+    const shouldMergeIndex = mode === 'merge' && parsed.year === undefined;
 
     // In merge mode the index query runs alongside TMDB; in fallback mode it
     // only runs when TMDB found nothing.
-    const eager = merge ? fuzzyHits(title, page, limit, mediaType) : undefined;
+    const indexRequest = shouldMergeIndex ? fuzzyHits(title, page, limit, mediaType) : undefined;
     const tmdb = await tmdbPage;
     const tmdbEmpty = tmdb.results.length === 0;
 
-    const hits = await (eager ?? (tmdbEmpty ? fuzzyHits(title, page, limit, mediaType) : []));
-    const hydrated = (
-      await hydrateMissing(hits, tmdb.results, tmdbEmpty ? limit : HYDRATION_CAP, mediaType)
-    ).filter((hit) => matchesSearchYear(hit, parsed.year));
+    let hits: SearchIndexHit[] = [];
+    if (indexRequest) {
+      hits = await indexRequest;
+    } else if (tmdbEmpty) {
+      hits = await fuzzyHits(title, page, limit, mediaType);
+    }
+
+    const hydrationLimit = tmdbEmpty ? limit : HYDRATION_CAP;
+    const hydratedCandidates = await hydrateMissing(hits, tmdb.results, hydrationLimit, mediaType);
+    const hydrated = hydratedCandidates.filter((hit) => matchesSearchYear(hit, parsed.year));
 
     if (tmdbEmpty) {
       return { results: hydrated, totalPages: hydrated.length > 0 ? 1 : tmdb.totalPages };
     }
+    const fusedResults = fuseByRank(tmdb.results, hits, hydrated, mediaType);
+    const rankedResults = rankByTitleMatch(title, fusedResults);
     return {
-      results: rankByTitleMatch(title, fuseByRank(tmdb.results, hits, hydrated, mediaType)),
+      results: rankedResults,
       totalPages: tmdb.totalPages,
     };
   }
@@ -403,9 +411,6 @@ export function createSearchEngine(sources: SearchSources) {
   }
 
   /**
-   * Fetches search movies data for use with React Query.
-   * Can be called on both server and client (via server actions).
-   *
    * A trailing year in the query (e.g. "heat 1995") is used as a release-year
    * filter, and a trailing media-type keyword (e.g. "heat movie") is stripped
    * from the title. When the filtered search has no matches at all, the raw
@@ -417,7 +422,7 @@ export function createSearchEngine(sources: SearchSources) {
    * @param page - The page number to fetch
    * @returns Object containing movies array and total pages
    */
-  async function getSearchMovies(query: string, page: number = 1): Promise<SearchMoviesResult> {
+  async function getSearchMovies(query: string, page = 1): Promise<SearchMoviesResult> {
     const parsed = parseSearchQuery(query);
     const { results, totalPages } = await completeWithIndex(
       fetchSingleTypePage(parsed, query, async (title, year) => {
@@ -430,9 +435,6 @@ export function createSearchEngine(sources: SearchSources) {
   }
 
   /**
-   * Fetches search TV shows data for use with React Query.
-   * Can be called on both server and client (via server actions).
-   *
    * A trailing year in the query (e.g. "the office 2005") is used as a
    * first-air-date filter, and a trailing media-type keyword is stripped from
    * the title. When the filtered search has no matches at all, the raw query is
@@ -443,7 +445,7 @@ export function createSearchEngine(sources: SearchSources) {
    * @param page - The page number to fetch
    * @returns Object containing TV shows array and total pages
    */
-  async function getSearchTvShows(query: string, page: number = 1): Promise<SearchTvShowsResult> {
+  async function getSearchTvShows(query: string, page = 1): Promise<SearchTvShowsResult> {
     const parsed = parseSearchQuery(query);
     const { results, totalPages } = await completeWithIndex(
       fetchSingleTypePage(parsed, query, async (title, year) => {
@@ -456,9 +458,6 @@ export function createSearchEngine(sources: SearchSources) {
   }
 
   /**
-   * Fetches search persons data for use with React Query.
-   * Can be called on both server and client (via server actions).
-   *
    * Trailing year and media-type tokens (e.g. "brad pitt person") are stripped
    * from the title before searching; persons have no year filter. When the
    * stripped search has no matches at all, the raw query is retried. Every page
@@ -469,7 +468,7 @@ export function createSearchEngine(sources: SearchSources) {
    * @param page - The page number to fetch
    * @returns Object containing persons array and total pages
    */
-  async function getSearchPersons(query: string, page: number = 1): Promise<SearchPersonsResult> {
+  async function getSearchPersons(query: string, page = 1): Promise<SearchPersonsResult> {
     const parsed = parseSearchQuery(query);
     const { results, totalPages } = await completeWithIndex(
       fetchSingleTypePage(parsed, query, async (title) => {
@@ -496,9 +495,6 @@ export function createSearchEngine(sources: SearchSources) {
   }
 
   /**
-   * Fetches multi search data for use with React Query.
-   * Can be called on both server and client (via server actions).
-   *
    * A trailing media-type keyword ("heat movie", "the office tv show",
    * "brad pitt person") narrows the search to that endpoint. Otherwise, when the
    * query ends in a year (e.g. "heat 1995") — TMDB's multi endpoint has no year
@@ -514,7 +510,7 @@ export function createSearchEngine(sources: SearchSources) {
    * @param page - The page number to fetch
    * @returns Object containing mixed results array and total pages
    */
-  async function getSearchMulti(query: string, page: number = 1): Promise<SearchMultiResult> {
+  async function getSearchMulti(query: string, page = 1): Promise<SearchMultiResult> {
     return await searchMulti(query, page, INDEX_PAGE_LIMIT, 'merge');
   }
 

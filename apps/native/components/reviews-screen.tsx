@@ -1,15 +1,14 @@
-import type { Review, ReviewsInput } from '@movies/api/reviews';
+import { useCatalogDetails, useCatalogReviews } from '@movies/api/react/use-catalog-query';
+import type { Review, ReviewsInput, ReviewsPage } from '@movies/api/reviews';
 import { BottomNavigation } from '@native/components/bottom-navigation';
 import { CatalogPagination } from '@native/components/catalog-pagination';
 import { ReviewCard } from '@native/components/review-card';
 import { ScreenQueryState } from '@native/components/screen-query-state';
-import { orpc } from '@native/lib/api';
 import { catalogPath } from '@native/lib/catalog-navigation';
 import { useRegion } from '@native/lib/preferences';
 import { readReviewsInput, reviewCountLabel } from '@native/lib/review-model';
 import { regionOr } from '@native/lib/search-params';
 import { useRememberedScroll } from '@native/lib/use-remembered-scroll';
-import { useQuery } from '@tanstack/react-query';
 import { Link, Stack, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { FlatList, Pressable, Text, View } from 'react-native';
 import { SafeAreaView as NativeSafeAreaView } from 'react-native-safe-area-context';
@@ -22,19 +21,8 @@ function Separator() {
 }
 
 function ReviewsResults({ input, region }: { input: ReviewsInput; region: string }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const query = useQuery(orpc.catalog.reviews.queryOptions({ input, retry: false }));
-  const details = useQuery(
-    orpc.catalog.details.queryOptions({
-      input: { id: input.id, type: input.type, region },
-      retry: false,
-    }),
-  );
-  const title = details.data?.title || 'this title';
-  const { ref, onScroll, onLayout, onContentSizeChange, onScrollBeginDrag } = useRememberedScroll<
-    FlatList<Review>
-  >('reviews:' + input.type + ':' + input.id + ':' + input.page, 'entry');
+  const query = useCatalogReviews(input);
+  const details = useCatalogDetails({ id: input.id, type: input.type, region });
   if (query.isPending || query.isError) {
     return (
       <ScreenQueryState
@@ -46,7 +34,26 @@ function ReviewsResults({ input, region }: { input: ReviewsInput; region: string
       />
     );
   }
-  const data = query.data;
+  return <ReviewList input={input} region={region} data={query.data} title={details.data?.title} />;
+}
+
+function ReviewList({
+  input,
+  region,
+  data,
+  title,
+}: {
+  input: ReviewsInput;
+  region: string;
+  title?: string;
+  data: ReviewsPage;
+}) {
+  const titleLabel = title || 'this title';
+  const router = useRouter();
+  const pathname = usePathname();
+  const { ref, onScroll, onLayout, onContentSizeChange, onScrollBeginDrag } = useRememberedScroll<
+    FlatList<Review>
+  >('reviews:' + input.type + ':' + input.id + ':' + input.page, 'entry');
   return (
     <FlatList
       testID="reviews-scroll"
@@ -74,14 +81,14 @@ function ReviewsResults({ input, region }: { input: ReviewsInput; region: string
             asChild
           >
             <Pressable accessibilityRole="link" className="min-h-11 justify-center self-start">
-              <Text className="text-sm text-muted">← Back to {title}</Text>
+              <Text className="text-sm text-muted">← Back to {titleLabel}</Text>
             </Pressable>
           </Link>
           <Text accessibilityRole="header" className="text-3xl font-bold text-foreground">
             Reviews
           </Text>
           <Text className="text-sm text-muted">
-            {reviewCountLabel(data.totalResults)} of {title} from TMDb
+            {reviewCountLabel(data.totalResults)} of {titleLabel} from TMDb
           </Text>
         </View>
       }

@@ -17,6 +17,7 @@ export function isPasskeySupported() {
   );
   return Boolean(nativePasskeys?.isSupported());
 }
+
 const ceremony = createPasskeyCeremony({
   available: isPasskeySupported,
   request: (path, options) => authClient.$fetch(path, { ...options, throw: false }),
@@ -29,24 +30,30 @@ const ceremony = createPasskeyCeremony({
     return passkeys.get(options);
   },
 });
+
 export async function addDevicePasskey(name: string) {
   if (Platform.OS === 'web') {
     return authClient.passkey.addPasskey({ name });
   }
   return ceremony.add(name);
 }
+
 export async function signInDevicePasskey() {
   if (Platform.OS === 'web') {
     return authClient.signIn.passkey();
   }
   return ceremony.signIn();
 }
+
 export async function readPasskeys() {
   const result = await authClient.passkey.listUserPasskeys();
   if (result.error || !result.data) {
-    throw Object.assign(new Error('Could not load passkeys'), {
-      code: result.error?.status === 401 ? 'UNAUTHORIZED' : result.error?.code,
-    });
+    throw passkeyListError(result.error);
   }
   return passkeyListSchema.parse(result.data);
+}
+
+function passkeyListError(error: { status?: number; code?: string } | null) {
+  const code = error?.status === 401 ? 'UNAUTHORIZED' : error?.code;
+  return Object.assign(new Error('Could not load passkeys'), { code });
 }

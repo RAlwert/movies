@@ -18,12 +18,13 @@ function keyExtractor(item: MediaCard) {
 }
 
 function CardMetadata({ item, featured }: { item: MediaCard; featured: boolean }) {
+  const appearance = featured
+    ? { spacing: 'gap-2 p-5', title: 'text-2xl leading-tight tracking-tight' }
+    : { spacing: 'gap-1 p-3', title: 'text-sm' };
+  const rating = displayRating(item.rating).toFixed(1);
   return (
-    <View className={`absolute right-0 bottom-0 left-0 ${featured ? 'gap-2 p-5' : 'gap-1 p-3'}`}>
-      <Text
-        numberOfLines={2}
-        className={`font-semibold text-white ${featured ? 'text-2xl leading-tight tracking-tight' : 'text-sm'}`}
-      >
+    <View className={`absolute right-0 bottom-0 left-0 ${appearance.spacing}`}>
+      <Text numberOfLines={2} className={`font-semibold text-white ${appearance.title}`}>
         {item.title}
       </Text>
       <View className="flex-row items-center justify-between">
@@ -36,10 +37,10 @@ function CardMetadata({ item, featured }: { item: MediaCard; featured: boolean }
               accessible={false}
             />
             <Text
-              accessibilityLabel={`Rating ${displayRating(item.rating).toFixed(1)} out of 10`}
+              accessibilityLabel={`Rating ${rating} out of 10`}
               className="text-xs text-yellow-500"
             >
-              {displayRating(item.rating).toFixed(1)}
+              {rating}
             </Text>
           </View>
         )}
@@ -73,15 +74,32 @@ function CardImage({
   featured: boolean;
   fluid: boolean;
 }) {
-  const source = featured ? item.backdropUrl : item.posterUrl;
-  const [failedSource, setFailedSource] = useState<string | null>(null);
-  const reducedMotion = useReducedMotion();
-  const hasImage = source !== null && source !== failedSource;
   return (
     <View
       className={`items-center justify-center overflow-hidden border border-border bg-zinc-800 ${posterDimensions(featured, fluid)}`}
     >
-      {hasImage ? (
+      <PosterArtwork source={featured ? item.backdropUrl : item.posterUrl} />
+      <View className="absolute top-2 left-2">
+        <MediaBadge type={item.type} />
+      </View>
+      <CardMetadata item={item} featured={featured} />
+    </View>
+  );
+}
+
+function ArtworkShade() {
+  return (
+    <View className="absolute inset-0 bg-linear-to-t from-black via-black/60 to-transparent" />
+  );
+}
+
+function PosterArtwork({ source }: { source: string | null }) {
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const reducedMotion = useReducedMotion();
+  const hasImage = source !== null && source !== failedSource;
+  if (hasImage) {
+    return (
+      <>
         <Image
           source={source}
           contentFit="cover"
@@ -91,27 +109,38 @@ function CardImage({
           accessibilityIgnoresInvertColors
           accessible={false}
         />
-      ) : null}
-      <View className="absolute inset-0 bg-linear-to-t from-black via-black/60 to-transparent" />
-      {!hasImage ? (
-        <Text className="absolute inset-x-3 top-20 text-center text-xs text-zinc-400">
-          No image available
-        </Text>
-      ) : null}
-      <View className="absolute top-2 left-2">
-        <MediaBadge type={item.type} />
-      </View>
-      <CardMetadata item={item} featured={featured} />
-    </View>
+        <ArtworkShade />
+      </>
+    );
+  }
+  return (
+    <>
+      <ArtworkShade />
+      <Text className="absolute inset-x-3 top-20 text-center text-xs text-zinc-400">
+        No image available
+      </Text>
+    </>
   );
 }
+
 function mediaLabel(type: MediaCard['type']) {
   return type === 'movie' ? 'Movie' : 'TV Show';
 }
+
 function releaseYear(date: string) {
   return date.slice(0, 4) || 'Release date TBA';
 }
-export const MediaPoster = memo(function Poster({
+
+type PosterParams = { type: MediaCard['type']; id: MediaCard['id']; region?: string };
+
+function posterParams(item: MediaCard, region?: string): PosterParams {
+  if (!region) {
+    return { type: item.type, id: item.id };
+  }
+  return { type: item.type, id: item.id, region };
+}
+
+export const MediaPoster = memo(function MediaPoster({
   item,
   featured = false,
   fluid = false,
@@ -129,7 +158,7 @@ export const MediaPoster = memo(function Poster({
       <Link
         href={{
           pathname: catalogPath(pathname),
-          params: { type: item.type, id: item.id, ...(region ? { region } : {}) },
+          params: posterParams(item, region),
         }}
         asChild
       >
@@ -148,6 +177,7 @@ export const MediaPoster = memo(function Poster({
     </View>
   );
 });
+
 function Separator() {
   return <View className="w-3" />;
 }

@@ -1,9 +1,14 @@
+import { accountQueryKey } from '@movies/api/account-query-key';
 import type { ProviderChoice } from '@movies/api/preferences';
+import {
+  usePreferencesSetProvidersMutation,
+  usePreferencesProviderOptions,
+  usePreferencesProviders,
+} from '@movies/api/react/use-preferences-query';
 import type { RegionCode } from '@movies/config/regions';
 import { CatalogSectionState } from '@native/components/catalog-section-state';
 import { CheckIcon } from '@native/components/icons';
 import { SettingsSaveButton, SettingsSaveFeedback } from '@native/components/settings-controls';
-import { accountQueryKey } from '@native/lib/account-query-key';
 import { orpc, queryClient } from '@native/lib/api';
 import { combineQueryStates } from '@native/lib/query-state';
 import {
@@ -11,7 +16,6 @@ import {
   isUnauthorized,
   SETTINGS_LOGIN_HREF,
 } from '@native/lib/settings-session';
-import { useMutation, useQuery } from '@tanstack/react-query';
 import { Image as ExpoImage } from 'expo-image';
 import { Redirect } from 'expo-router';
 import { useState, type ReactNode } from 'react';
@@ -139,16 +143,11 @@ function ProviderForm({
   const [draft, setDraft] = useState<number[] | null>(null);
   const selected = draft ?? current;
   const providersKey = accountQueryKey(orpc.preferences.providers.queryKey(), userId);
-  const mutation = useMutation(
-    orpc.preferences.setProviders.mutationOptions({
-      async onSuccess(result) {
-        await commitSavedSetting(queryClient, providersKey, result, () => setDraft(null));
-        await queryClient.invalidateQueries({
-          queryKey: accountQueryKey(orpc.systemLists.options.key(), userId),
-        });
-      },
-    }),
-  );
+  const mutation = usePreferencesSetProvidersMutation({
+    async onSuccess(result) {
+      await commitSavedSetting(queryClient, providersKey, result, () => setDraft(null));
+    },
+  });
   const locked = mutation.isPending || !read.ready;
   function change(ids: number[]) {
     setDraft(ids);
@@ -197,9 +196,7 @@ function ProviderControls({
   change,
 }: {
   read: ReturnType<typeof combineQueryStates>;
-  mutation: ReturnType<
-    typeof useMutation<{ providerIds: number[] }, Error, { providerIds: number[] }>
-  >;
+  mutation: ReturnType<typeof usePreferencesSetProvidersMutation>;
   selected: number[];
   change: (ids: number[]) => void;
 }) {
@@ -257,17 +254,8 @@ export function ProviderSettings({
   header: ReactNode;
   userId: string;
 }) {
-  const saved = useQuery({
-    ...orpc.preferences.providers.queryOptions({ retry: false }),
-    queryKey: accountQueryKey(orpc.preferences.providers.queryKey(), userId),
-  });
-  const choices = useQuery({
-    ...orpc.preferences.providerOptions.queryOptions({ input: { region }, retry: false }),
-    queryKey: accountQueryKey(
-      orpc.preferences.providerOptions.queryKey({ input: { region } }),
-      userId,
-    ),
-  });
+  const saved = usePreferencesProviders(userId);
+  const choices = usePreferencesProviderOptions(userId, { region });
   const state = combineQueryStates([saved, choices]);
   return (
     <ProviderAccess error={state.error}>

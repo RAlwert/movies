@@ -1,4 +1,4 @@
-import { os, type RouterClient } from '@orpc/server';
+import { os, type RouterClient, type InferSchemaOutput } from '@orpc/server';
 import { z } from 'zod';
 
 import {
@@ -9,6 +9,7 @@ import {
 } from './catalog';
 import {
   catalogTitleInput,
+  directWatchLinksSchema,
   catalogCreditsSchema,
   type CatalogCredits,
   catalogRelatedInput,
@@ -36,7 +37,33 @@ import {
   type DiscoveryOptions,
 } from './discover';
 import { homeListInput, trendingInput, mediaCardSchema, type MediaCard } from './home';
-import { catalogImdbSchema, type CatalogImdb } from './imdb';
+import {
+  imdbRatingSchema,
+  catalogImdbSchema,
+  imdbIdSchema,
+  imdbTitleSchema,
+  type ImdbTitle,
+  type CatalogImdb,
+} from './imdb';
+import {
+  movieMetadataSchema,
+  tvMetadataSchema,
+  movieCreditMetadataSchema,
+  tvCreditMetadataSchema,
+  aggregateCreditMetadataSchema,
+  availabilitySchema,
+  externalIdsSchema,
+  personMetadataSchema,
+  personMovieCreditsSchema,
+  personTvCreditsSchema,
+  genreRecordsSchema,
+  providerRecordSchema,
+  certificationSchema,
+  ratingInput,
+  type CatalogMetadataService,
+  type PersonMetadataService,
+} from './metadata';
+import type { MutationEffect, MutationEvent } from './mutation-effects';
 import {
   pdpExtrasSchema,
   seasonInput,
@@ -86,28 +113,39 @@ import {
   type SystemListToggleInput,
   type SystemListMoveInput,
 } from './system-lists';
+import type { DirectWatchLink } from './tmdb-types/watch-provider';
 
 // Services are supplied by the host, so the router has no app, env, or database dependencies.
 export type HomeService = {
   list(input: z.infer<typeof homeListInput>): Promise<MediaCard[]>;
   trending(input: z.infer<typeof trendingInput>): Promise<MediaCard[]>;
 };
-export type CatalogService = PdpService & {
-  imdb(input: CatalogTitleInput): Promise<CatalogImdb>;
-  reviews(input: ReviewsInput): Promise<ReviewsPage>;
-  credits(input: CatalogTitleInput): Promise<CatalogCredits>;
-  details(input: CatalogDetailInput): Promise<CatalogDetail>;
-  trailer(input: CatalogTitleInput): Promise<Trailer>;
-  providers(input: CatalogDetailInput): Promise<ProviderGroups>;
-  related(input: CatalogRelatedInput): Promise<MediaCard[]>;
-};
+export type CatalogService = PdpService &
+  CatalogMetadataService & {
+    resolveImdb(input: { imdbId: string }): Promise<ImdbTitle | null>;
+    certification(input: CatalogDetailInput): Promise<z.infer<typeof certificationSchema>>;
+    rating(input: z.infer<typeof ratingInput>): Promise<z.infer<typeof imdbRatingSchema> | null>;
+    watchLinks(input: CatalogTitleInput): Promise<DirectWatchLink[]>;
+    imdb(input: CatalogTitleInput): Promise<CatalogImdb>;
+    reviews(input: ReviewsInput): Promise<ReviewsPage>;
+    credits(input: CatalogTitleInput): Promise<CatalogCredits>;
+    details(input: CatalogDetailInput): Promise<CatalogDetail>;
+    trailer(input: CatalogTitleInput): Promise<Trailer>;
+    providers(input: CatalogDetailInput): Promise<ProviderGroups>;
+    related(input: CatalogRelatedInput): Promise<MediaCard[]>;
+  };
 export type DiscoveryService = {
+  genres(input: { type: 'movie' | 'tv' }): Promise<z.infer<typeof genreRecordsSchema>>;
+  providerCatalog(input: DiscoveryOptionsInput): Promise<z.infer<typeof providerRecordSchema>[]>;
   facets(input: DiscoveryFacetInput): Promise<DiscoveryChoice[]>;
   list(input: DiscoveryInput): Promise<DiscoveryPage>;
   options(input: DiscoveryOptionsInput): Promise<DiscoveryOptions>;
 };
-export type SearchService = { list(input: SearchInput): Promise<SearchPage> };
-export type PersonService = {
+export type SearchService = {
+  list(input: SearchInput): Promise<SearchPage>;
+  suggestions(input: { query: string }): Promise<SearchPage>;
+};
+export type PersonService = PersonMetadataService & {
   details(input: PersonInput): Promise<PersonDetail>;
   credits(input: PersonCreditsInput): Promise<PersonCredit[]>;
 };
@@ -136,7 +174,10 @@ export type AppServices = {
   catalog: CatalogService;
   discovery: DiscoveryService;
 };
-export type AppContext = AppServices & { session?: { current(): Promise<SessionUser | null> } };
+export type AppContext = AppServices & {
+  session?: { current(): Promise<SessionUser | null> };
+  onMutation?: (event: MutationEvent) => void | Promise<void>;
+};
 const procedure = os.$context<AppContext>();
 
 /**
@@ -157,87 +198,86 @@ const authedProcedure = procedure
     return next({ context: { user } });
   });
 
+/** Hosts may react to validated, successful writes without inspecting HTTP paths or bodies. */
+function mutationProcedure<TSchema extends z.ZodType>(
+  schema: TSchema,
+  effect: (input: InferSchemaOutput<TSchema>) => MutationEffect,
+) {
+  return authedProcedure.input(schema).use(async ({ context, next }, input) => {
+    const result = await next();
+    await context.onMutation?.({ ...effect(input), userId: context.user.id });
+    return result;
+  });
+}
+
+const customListErrors = {
+  NOT_FOUND: { message: 'List or item not found' },
+  CONFLICT: { message: 'Item already in list' },
+};
+
 export const appRouter = {
   customLists: {
     index: authedProcedure
       .input(customListContracts.index.input)
       .output(customListContracts.index.output)
-      .errors({
-        NOT_FOUND: { message: 'List or item not found' },
-        CONFLICT: { message: 'Item already in list' },
-      })
+      .errors(customListErrors)
       .handler(({ input, context }) => context.customLists.index(context.user.id, input)),
     details: authedProcedure
       .input(customListContracts.details.input)
       .output(customListContracts.details.output)
-      .errors({
-        NOT_FOUND: { message: 'List or item not found' },
-        CONFLICT: { message: 'Item already in list' },
-      })
+      .errors(customListErrors)
       .handler(({ input, context }) => context.customLists.details(context.user.id, input)),
-    create: authedProcedure
-      .input(customListContracts.create.input)
+    create: mutationProcedure(customListContracts.create.input, () => ({ domain: 'customLists' }))
       .output(customListContracts.create.output)
-      .errors({
-        NOT_FOUND: { message: 'List or item not found' },
-        CONFLICT: { message: 'Item already in list' },
-      })
+      .errors(customListErrors)
       .handler(({ input, context }) => context.customLists.create(context.user.id, input)),
-    update: authedProcedure
-      .input(customListContracts.update.input)
+    update: mutationProcedure(customListContracts.update.input, (input) => ({
+      domain: 'customLists',
+      listId: input.listId,
+    }))
       .output(customListContracts.update.output)
-      .errors({
-        NOT_FOUND: { message: 'List or item not found' },
-        CONFLICT: { message: 'Item already in list' },
-      })
+      .errors(customListErrors)
       .handler(({ input, context }) => context.customLists.update(context.user.id, input)),
-    delete: authedProcedure
-      .input(customListContracts.delete.input)
+    delete: mutationProcedure(customListContracts.delete.input, (input) => ({
+      domain: 'customLists',
+      listId: input.listId,
+    }))
       .output(customListContracts.delete.output)
-      .errors({
-        NOT_FOUND: { message: 'List or item not found' },
-        CONFLICT: { message: 'Item already in list' },
-      })
+      .errors(customListErrors)
       .handler(({ input, context }) => context.customLists.delete(context.user.id, input)),
-    add: authedProcedure
-      .input(customListContracts.add.input)
+    add: mutationProcedure(customListContracts.add.input, (input) => ({
+      domain: 'customLists',
+      listId: input.listId,
+      resource: { resourceId: input.resourceId, resourceType: input.resourceType },
+    }))
       .output(customListContracts.add.output)
-      .errors({
-        NOT_FOUND: { message: 'List or item not found' },
-        CONFLICT: { message: 'Item already in list' },
-      })
+      .errors(customListErrors)
       .handler(({ input, context }) => context.customLists.add(context.user.id, input)),
-    remove: authedProcedure
-      .input(customListContracts.remove.input)
+    remove: mutationProcedure(customListContracts.remove.input, (input) => ({
+      domain: 'customLists',
+      listId: input.listId,
+      resource: { resourceId: input.resourceId, resourceType: input.resourceType },
+    }))
       .output(customListContracts.remove.output)
-      .errors({
-        NOT_FOUND: { message: 'List or item not found' },
-        CONFLICT: { message: 'Item already in list' },
-      })
+      .errors(customListErrors)
       .handler(({ input, context }) => context.customLists.remove(context.user.id, input)),
     status: authedProcedure
       .input(customListContracts.status.input)
       .output(customListContracts.status.output)
-      .errors({
-        NOT_FOUND: { message: 'List or item not found' },
-        CONFLICT: { message: 'Item already in list' },
-      })
+      .errors(customListErrors)
       .handler(({ input, context }) => context.customLists.status(context.user.id, input)),
-    move: authedProcedure
-      .input(customListContracts.move.input)
+    move: mutationProcedure(customListContracts.move.input, (input) => ({
+      domain: 'customLists',
+      listId: input.listId,
+    }))
       .output(customListContracts.move.output)
-      .errors({
-        NOT_FOUND: { message: 'List or item not found' },
-        CONFLICT: { message: 'Item already in list' },
-      })
+      .errors(customListErrors)
       .handler(({ input, context }) => context.customLists.move(context.user.id, input)),
-    moveItem: authedProcedure
-      .input(customListContracts.moveItem.input)
+    moveItem: mutationProcedure(customListContracts.moveItem.input, () => ({
+      domain: 'customLists',
+    }))
       .output(customListContracts.moveItem.output)
-      .errors({
-        NOT_FOUND: { message: 'List or item not found' },
-        CONFLICT: { message: 'Item already in list' },
-      })
+      .errors(customListErrors)
       .handler(({ input, context }) => context.customLists.moveItem(context.user.id, input)),
   },
   systemLists: {
@@ -253,12 +293,17 @@ export const appRouter = {
       .input(systemListResourceInput)
       .output(systemListMembershipSchema)
       .handler(({ input, context }) => context.systemLists.memberships(context.user.id, input)),
-    toggle: authedProcedure
-      .input(systemListToggleInput)
+    toggle: mutationProcedure(systemListToggleInput, (input) => ({
+      domain: 'systemLists',
+      listType: input.listType,
+      resource: { resourceId: input.resourceId, resourceType: input.resourceType },
+    }))
       .output(systemListToggleSchema)
       .handler(({ input, context }) => context.systemLists.toggle(context.user.id, input)),
-    move: authedProcedure
-      .input(systemListMoveInput)
+    move: mutationProcedure(systemListMoveInput, (input) => ({
+      domain: 'systemLists',
+      listType: input.listType,
+    }))
       .output(systemListMoveResultSchema)
       .errors({ NOT_FOUND: { message: 'Item not found' } })
       .handler(({ input, context }) => context.systemLists.move(context.user.id, input)),
@@ -275,8 +320,7 @@ export const appRouter = {
     providers: authedProcedure
       .output(providerPreferenceSchema)
       .handler(({ context }) => context.preferences.providers(context.user.id)),
-    setProviders: authedProcedure
-      .input(providerPreferenceSchema)
+    setProviders: mutationProcedure(providerPreferenceSchema, () => ({ domain: 'preferences' }))
       .output(providerPreferenceSchema)
       .handler(({ input, context }) => context.preferences.setProviders(context.user.id, input)),
     providerOptions: authedProcedure
@@ -286,12 +330,23 @@ export const appRouter = {
     region: authedProcedure
       .output(regionPreferenceSchema)
       .handler(({ context }) => context.preferences.region(context.user.id)),
-    setRegion: authedProcedure
-      .input(regionPreferenceSchema)
+    setRegion: mutationProcedure(regionPreferenceSchema, () => ({ domain: 'preferences' }))
       .output(regionPreferenceSchema)
       .handler(({ input, context }) => context.preferences.setRegion(context.user.id, input)),
   },
   person: {
+    profile: procedure
+      .input(personInput)
+      .output(personMetadataSchema)
+      .handler(({ input, context }) => context.person.profile(input)),
+    movieCredits: procedure
+      .input(personInput)
+      .output(personMovieCreditsSchema)
+      .handler(({ input, context }) => context.person.movieCredits(input)),
+    tvCredits: procedure
+      .input(personInput)
+      .output(personTvCreditsSchema)
+      .handler(({ input, context }) => context.person.tvCredits(input)),
     details: procedure
       .input(personInput)
       .output(personDetailSchema)
@@ -303,12 +358,24 @@ export const appRouter = {
       .handler(({ input, context }) => context.person.credits(input)),
   },
   search: {
+    suggestions: procedure
+      .input(searchInput.pick({ query: true }))
+      .output(searchPageSchema)
+      .handler(({ input, context }) => context.search.suggestions(input)),
     list: procedure
       .input(searchInput)
       .output(searchPageSchema)
       .handler(({ input, context }) => context.search.list(input)),
   },
   discovery: {
+    genres: procedure
+      .input(discoveryOptionsInput.pick({ type: true }))
+      .output(genreRecordsSchema)
+      .handler(({ input, context }) => context.discovery.genres(input)),
+    providerCatalog: procedure
+      .input(discoveryOptionsInput)
+      .output(z.array(providerRecordSchema))
+      .handler(({ input, context }) => context.discovery.providerCatalog(input)),
     facets: procedure
       .input(discoveryFacetInput)
       .output(z.array(discoveryChoice))
@@ -323,6 +390,50 @@ export const appRouter = {
       .handler(({ input, context }) => context.discovery.options(input)),
   },
   catalog: {
+    movieDetails: procedure
+      .input(pdpEntityInput)
+      .output(movieMetadataSchema)
+      .handler(({ input, context }) => context.catalog.movieDetails(input)),
+    tvDetails: procedure
+      .input(pdpEntityInput)
+      .output(tvMetadataSchema)
+      .handler(({ input, context }) => context.catalog.tvDetails(input)),
+    movieCredits: procedure
+      .input(pdpEntityInput)
+      .output(movieCreditMetadataSchema)
+      .handler(({ input, context }) => context.catalog.movieCredits(input)),
+    tvCredits: procedure
+      .input(pdpEntityInput)
+      .output(tvCreditMetadataSchema)
+      .handler(({ input, context }) => context.catalog.tvCredits(input)),
+    aggregateCredits: procedure
+      .input(pdpEntityInput)
+      .output(aggregateCreditMetadataSchema)
+      .handler(({ input, context }) => context.catalog.aggregateCredits(input)),
+    availability: procedure
+      .input(catalogTitleInput)
+      .output(availabilitySchema)
+      .handler(({ input, context }) => context.catalog.availability(input)),
+    externalIds: procedure
+      .input(catalogTitleInput)
+      .output(externalIdsSchema)
+      .handler(({ input, context }) => context.catalog.externalIds(input)),
+    certification: procedure
+      .input(catalogDetailInput)
+      .output(certificationSchema)
+      .handler(({ input, context }) => context.catalog.certification(input)),
+    rating: procedure
+      .input(ratingInput)
+      .output(imdbRatingSchema.nullable())
+      .handler(({ input, context }) => context.catalog.rating(input)),
+    resolveImdb: procedure
+      .input(z.object({ imdbId: imdbIdSchema }))
+      .output(imdbTitleSchema.nullable())
+      .handler(({ input, context }) => context.catalog.resolveImdb(input)),
+    watchLinks: procedure
+      .input(catalogTitleInput)
+      .output(directWatchLinksSchema)
+      .handler(({ input, context }) => context.catalog.watchLinks(input)),
     extras: procedure
       .input(catalogDetailInput)
       .output(pdpExtrasSchema)

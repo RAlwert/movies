@@ -1,13 +1,12 @@
 import type { CatalogDetailInput } from '@movies/api/catalog';
 import type { CollectionPage, PdpExtras } from '@movies/api/pdp';
+import { useCatalogCollection, useCatalogExtras } from '@movies/api/react/use-catalog-query';
 import { CatalogOrganizationSections } from '@native/components/catalog-organizations';
 import { CatalogSectionState } from '@native/components/catalog-section-state';
 import { PdpImage } from '@native/components/pdp-image';
 import { PdpMedia } from '@native/components/pdp-media';
 import { useScrollNavigation } from '@native/components/scroll-navigation';
-import { orpc } from '@native/lib/api';
 import { catalogPath } from '@native/lib/catalog-navigation';
-import { useQuery } from '@tanstack/react-query';
 import { Link, usePathname } from 'expo-router';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
@@ -41,8 +40,9 @@ function CollectionParts({ parts, region }: { parts: CollectionPage['parts']; re
     </ScrollView>
   );
 }
+
 function Collection({ id, region }: { id: number; region: string }) {
-  const query = useQuery(orpc.catalog.collection.queryOptions({ input: { id }, retry: false }));
+  const query = useCatalogCollection({ id });
   return (
     <View className="gap-3">
       <CatalogSectionState
@@ -64,6 +64,7 @@ function Collection({ id, region }: { id: number; region: string }) {
     </View>
   );
 }
+
 function Seasons({ data, input }: { data: PdpExtras; input: CatalogDetailInput }) {
   const pathname = usePathname();
   const navigation = useScrollNavigation();
@@ -73,34 +74,38 @@ function Seasons({ data, input }: { data: PdpExtras; input: CatalogDetailInput }
       params: { id: input.id, type: 'tv', season, region: input.region },
     };
   }
-  if (!data.seasons.length && !data.next && !data.latest) {
+  if (data.seasons.length === 0 && !data.next && !data.latest) {
     return null;
   }
+  const episodes = [
+    { label: 'Next Episode', episode: data.next },
+    { label: 'Latest Episode', episode: data.latest },
+  ];
   return (
     <View className="gap-4">
       <Text accessibilityRole="header" className="text-xl font-semibold text-foreground">
         Seasons &amp; Episodes ({data.seasons.length})
       </Text>
-      {[
-        ['Next Episode', data.next],
-        ['Latest Episode', data.latest],
-      ].map(([label, episode]) =>
-        typeof episode === 'object' && episode ? (
-          <Link key={String(label)} href={href(episode.season_number)} asChild>
+      {episodes.map(({ label, episode }) => {
+        if (!episode) {
+          return null;
+        }
+        return (
+          <Link key={label} href={href(episode.season_number)} asChild>
             <Pressable
               {...navigation}
               accessibilityRole="link"
               className="bg-default gap-2 rounded-xl border border-border p-4"
             >
-              <Text className="text-sm text-muted">{String(label)}</Text>
+              <Text className="text-sm text-muted">{label}</Text>
               <Text className="font-semibold text-foreground">
                 Season {episode.season_number}, episode {episode.episode_number}
               </Text>
               <Text className="text-sm text-muted">{episode.air_date || 'Air date TBA'}</Text>
             </Pressable>
           </Link>
-        ) : null,
-      )}
+        );
+      })}
       <ScrollView horizontal contentContainerClassName="gap-4">
         {data.seasons.map((season) => (
           <Link key={season.id} href={href(season.season_number)} asChild>
@@ -124,11 +129,12 @@ function Seasons({ data, input }: { data: PdpExtras; input: CatalogDetailInput }
     </View>
   );
 }
+
 function Keywords({ items, input }: { items: PdpExtras['keywords']; input: CatalogDetailInput }) {
   const pathname = usePathname();
   const navigation = useScrollNavigation();
   const prefix = catalogPath(pathname).replace('/[type]/[id]', '');
-  if (!items.length) {
+  if (items.length === 0) {
     return null;
   }
   return (
@@ -159,8 +165,9 @@ function Keywords({ items, input }: { items: PdpExtras['keywords']; input: Catal
     </View>
   );
 }
+
 function Releases({ items, region }: { items: PdpExtras['releases']; region: string }) {
-  if (!items.length) {
+  if (items.length === 0) {
     return null;
   }
   return (
@@ -177,6 +184,7 @@ function Releases({ items, region }: { items: PdpExtras['releases']; region: str
     </View>
   );
 }
+
 function Availability({ data, region }: { data: PdpExtras; region: string }) {
   return (
     <View className="gap-6">
@@ -185,6 +193,7 @@ function Availability({ data, region }: { data: PdpExtras; region: string }) {
     </View>
   );
 }
+
 export function PdpSections({
   input,
   title,
@@ -194,13 +203,10 @@ export function PdpSections({
   title: string;
   part?: 'details' | 'seasons' | 'availability';
 }) {
-  const query = useQuery(orpc.catalog.extras.queryOptions({ input, retry: false }));
+  const query = useCatalogExtras(input);
   const data = query.data;
-  if (part === 'seasons') {
-    return data && input.type === 'tv' ? <Seasons data={data} input={input} /> : null;
-  }
-  if (part === 'availability') {
-    return data ? <Availability data={data} region={input.region} /> : null;
+  if (part !== 'details') {
+    return data ? <SupportingSections part={part} data={data} input={input} /> : null;
   }
   return (
     <View className="gap-6">
@@ -221,4 +227,22 @@ export function PdpSections({
       ) : null}
     </View>
   );
+}
+
+function SupportingSections({
+  part,
+  data,
+  input,
+}: {
+  part: 'seasons' | 'availability';
+  data: PdpExtras;
+  input: CatalogDetailInput;
+}) {
+  if (part === 'availability') {
+    return <Availability data={data} region={input.region} />;
+  }
+  if (input.type !== 'tv') {
+    return null;
+  }
+  return <Seasons data={data} input={input} />;
 }

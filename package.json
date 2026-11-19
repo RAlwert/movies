@@ -35,7 +35,7 @@
     "check-types": "tsc --noEmit && vp exec -- turbo run check-types --filter=@movies/web --filter=@movies/native --filter=@movies/server --cache-dir=.turbo/cache",
     "dev:native": "vp run @movies/native#dev",
     "dev:api": "vp run @movies/server#dev",
-    "env:generate": "varlock codegen --path ./apps/native/ && varlock codegen --path ./apps/server/",
+    "env:generate": "varlock codegen --path ./apps/web/ && varlock codegen --path ./apps/native/ && varlock codegen --path ./apps/server/",
     "postinstall": "vp run env:generate",
     "check": "vp check"
   },
@@ -85,13 +85,14 @@
     "drizzle-kit": "^0.31.11",
     "eslint-plugin-better-tailwindcss": "^4.10.0",
     "fallow": "3.40.0",
+    "happy-dom": "21.0.4",
     "railway": "3.16.0",
     "shadcn": "^4.23.0",
     "turbo": "2.11.10",
     "typescript": "catalog:",
     "varlock": "catalog:",
-    "vitest": "catalog:",
-    "vite-plus": "catalog:"
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
   },
   "engines": {
     "node": "24.x"

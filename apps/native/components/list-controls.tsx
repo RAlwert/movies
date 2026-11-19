@@ -1,5 +1,10 @@
 import { ArrowDownIcon, ArrowUpIcon } from '@native/components/icons';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, View } from 'react-native';
+
+const moves = [
+  { direction: 'up', offset: -1, Icon: ArrowUpIcon },
+  { direction: 'down', offset: 1, Icon: ArrowDownIcon },
+] as const;
 
 export function ListMoveControls({
   name,
@@ -16,9 +21,9 @@ export function ListMoveControls({
 }) {
   return (
     <View className="flex-row gap-2">
-      {(['up', 'down'] as const).map((direction) => {
-        const disabled = pending || (direction === 'up' ? position <= 0 : position >= total - 1);
-        const Icon = direction === 'up' ? ArrowUpIcon : ArrowDownIcon;
+      {moves.map(({ direction, offset, Icon }) => {
+        const target = position + offset;
+        const disabled = pending || target < 0 || target > total - 1;
         return (
           <Pressable
             key={direction}
@@ -27,48 +32,12 @@ export function ListMoveControls({
             disabled={disabled}
             accessibilityState={{ disabled }}
             className="bg-default min-h-12 min-w-12 items-center justify-center rounded-lg px-3"
-            onPress={() => move(position + (direction === 'up' ? -1 : 1))}
+            onPress={() => move(target)}
           >
             <Icon className="size-5 text-foreground" accessible={false} />
           </Pressable>
         );
       })}
-    </View>
-  );
-}
-export function ListPageControls({
-  page,
-  pages,
-  blocked,
-  change,
-}: {
-  page: number;
-  pages: number;
-  blocked: boolean;
-  change: (page: number) => void;
-}) {
-  return (
-    <View className="items-center gap-3 p-5">
-      <Text className="text-muted">
-        Page {page} of {Math.max(1, pages)}
-      </Text>
-      <View className="flex-row gap-4">
-        {(['Previous', 'Next'] as const).map((label) => {
-          const disabled = blocked || (label === 'Previous' ? page <= 1 : page >= pages);
-          return (
-            <Pressable
-              key={label}
-              accessibilityRole="button"
-              disabled={disabled}
-              accessibilityState={{ disabled }}
-              className="bg-default min-h-12 justify-center rounded-lg px-4"
-              onPress={() => change(page + (label === 'Previous' ? -1 : 1))}
-            >
-              <Text className="text-foreground">{label} page</Text>
-            </Pressable>
-          );
-        })}
-      </View>
     </View>
   );
 }

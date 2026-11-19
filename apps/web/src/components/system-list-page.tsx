@@ -1,28 +1,28 @@
+import { accountQueryKey } from '@movies/api/account-query-key';
+import { regionPreferenceSchema } from '@movies/api/preferences';
+import { createApiQueryUtils } from '@movies/api/query-utils';
 import { dehydrate, HydrationBoundary } from '@tanstack/react-query';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 
-import { SYSTEM_LIST_QUERY_TIMES, SystemListContent } from '@/components/system-list-content';
+import { SystemListContent } from '@/components/system-list-content';
+import { createServerApi } from '@/lib/api-server';
 import { getUser } from '@/lib/auth-server';
 import { getQueryClient } from '@/lib/query-client';
-import { queryKeys } from '@/lib/query-keys';
-import {
-  getSystemListCount,
-  getSystemListWithResourceDetailsPaginated,
-} from '@/lib/system-list-queries';
 import type { SystemListType } from '@/lib/validations';
-import { getWatchProviderFilterContext } from '@/lib/watch-provider-filter-context';
-import {
-  activeWatchProviderFilter,
-  loadWatchProviderSearchParams,
-} from '@/lib/watch-provider-search-params';
+import { getListFilterContext } from '@/lib/watch-provider-filter-context';
+
+type SystemListSearchParams = {
+  mediaType?: string;
+  page?: string;
+  with_watch_providers?: string;
+  watch_region?: string;
+};
+
+type ListFilterContext = Awaited<ReturnType<typeof getListFilterContext>>;
 
 export type SystemListPageProps = {
-  searchParams: Promise<{
-    mediaType?: string;
-    page?: string;
-    with_watch_providers?: string;
-    watch_region?: string;
-  }>;
+  searchParams: Promise<SystemListSearchParams>;
 };
 
 /**
@@ -41,45 +41,13 @@ export async function SystemListPage({
   }
 
   const params = await searchParams;
-  const mediaType = (params.mediaType ?? 'movie') as 'movie' | 'tv';
-  const page = Number(params.page ?? '1');
 
-  const { with_watch_providers, watch_region } = loadWatchProviderSearchParams(params);
-  const { userRegion, availableWatchProviders } = await getWatchProviderFilterContext(watch_region);
+  const context = await getListFilterContext(params);
+  const { userRegion, availableWatchProviders } = context;
 
-  // Normalized exactly like the client content computes them, so the
-  // prefetched query key matches after hydration.
-  const { activeProviders, activeRegion } = activeWatchProviderFilter(
-    with_watch_providers,
-    userRegion,
-  );
-
-  const queryClient = getQueryClient();
-
-  const [watchProviders] = await Promise.all([
+  const [watchProviders, queryClient] = await Promise.all([
     availableWatchProviders,
-    queryClient.prefetchQuery({
-      queryKey: queryKeys[listType].list(mediaType, page, activeProviders, activeRegion),
-      queryFn: () =>
-        getSystemListWithResourceDetailsPaginated(
-          listType,
-          mediaType,
-          page,
-          activeProviders,
-          activeRegion,
-        ),
-      ...SYSTEM_LIST_QUERY_TIMES,
-    }),
-    queryClient.prefetchQuery({
-      queryKey: queryKeys[listType].count('movie'),
-      queryFn: () => getSystemListCount(listType, 'movie'),
-      ...SYSTEM_LIST_QUERY_TIMES,
-    }),
-    queryClient.prefetchQuery({
-      queryKey: queryKeys[listType].count('tv'),
-      queryFn: () => getSystemListCount(listType, 'tv'),
-      ...SYSTEM_LIST_QUERY_TIMES,
-    }),
+    prefetchSystemList(listType, params, user.id, context),
   ]);
 
   return (
@@ -92,4 +60,33 @@ export async function SystemListPage({
       />
     </HydrationBoundary>
   );
+}
+
+async function prefetchSystemList(
+  listType: SystemListType,
+  params: SystemListSearchParams,
+  userId: string,
+  context: ListFilterContext,
+) {
+  const { mediaType = 'movie', page = '1' } = params;
+  const queryClient = getQueryClient();
+  const requestHeaders = await headers();
+  const api = createServerApi(requestHeaders);
+  const queryUtils = createApiQueryUtils(api);
+  const selectedRegion = context.activeRegion ?? context.userRegion;
+  const input = {
+    listType,
+    resourceType: mediaType as 'movie' | 'tv',
+    page: Number(page),
+    providerIds: context.activeProviders ?? [],
+    region: regionPreferenceSchema.shape.region.parse(selectedRegion),
+  };
+  const queryOptions = queryUtils.systemLists.page.queryOptions({ input });
+  const queryKey = queryUtils.systemLists.page.queryKey({ input });
+
+  await queryClient.prefetchQuery({
+    ...queryOptions,
+    queryKey: accountQueryKey(queryKey, userId),
+  });
+  return queryClient;
 }

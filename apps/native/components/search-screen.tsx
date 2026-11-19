@@ -1,3 +1,4 @@
+import { useSearchList } from '@movies/api/react/use-search-query';
 import type { SearchInput, SearchItem } from '@movies/api/search';
 import { BottomNavigation } from '@native/components/bottom-navigation';
 import { CatalogPagination } from '@native/components/catalog-pagination';
@@ -8,10 +9,9 @@ import { MediaTypeTabs } from '@native/components/media-type-tabs';
 import { ScreenQueryState } from '@native/components/screen-query-state';
 import { ScrollNavigationProvider } from '@native/components/scroll-navigation';
 import { SearchPerson } from '@native/components/search-person-card';
-import { orpc } from '@native/lib/api';
+import { SearchSuggestions } from '@native/components/search-suggestions';
 import { readSearchState } from '@native/lib/search-state';
 import { useRememberedScroll } from '@native/lib/use-remembered-scroll';
-import { useQuery } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import { FlatList, Keyboard, Pressable, Text, TextInput, View } from 'react-native';
@@ -28,13 +28,14 @@ const types = [
 ] as const;
 
 function SearchForm({
-  initialQuery,
+  draft,
+  setDraft,
   onSearch,
 }: {
-  initialQuery: string;
+  draft: string;
+  setDraft: (value: string) => void;
   onSearch: (query: string) => void;
 }) {
-  const [draft, setDraft] = useState(initialQuery);
   function submit() {
     Keyboard.dismiss();
     onSearch(draft.trim());
@@ -64,6 +65,7 @@ function SearchForm({
     </View>
   );
 }
+
 function renderResult({ item }: { item: SearchItem }) {
   return (
     <View className="w-1/2 px-2 pb-4">
@@ -75,11 +77,13 @@ function renderResult({ item }: { item: SearchItem }) {
     </View>
   );
 }
+
 function resultKey(item: SearchItem) {
   return item.type + ':' + item.id;
 }
+
 function SearchResults({ input, onPage }: { input: SearchInput; onPage: (page: number) => void }) {
-  const query = useQuery(orpc.search.list.queryOptions({ input }));
+  const query = useSearchList(input);
   const {
     ref,
     onScroll,
@@ -96,7 +100,7 @@ function SearchResults({ input, onPage }: { input: SearchInput; onPage: (page: n
     return (
       <ScreenQueryState
         label="search results"
-        failed={query.isError}
+        failed
         retry={() => {
           void query.refetch();
         }}
@@ -133,6 +137,7 @@ function SearchResults({ input, onPage }: { input: SearchInput; onPage: (page: n
     </ScrollNavigationProvider>
   );
 }
+
 function SearchBody({ input, onPage }: { input: SearchInput; onPage: (page: number) => void }) {
   if (!input.query) {
     return (
@@ -143,12 +148,14 @@ function SearchBody({ input, onPage }: { input: SearchInput; onPage: (page: numb
   }
   return <SearchResults key={JSON.stringify(input)} input={input} onPage={onPage} />;
 }
-export function SearchScreen() {
+
+function SearchContent() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const state = readSearchState(params);
-  const query = state.query;
-  const type = state.type;
+  const [draft, setDraft] = useState(state.query);
+  const trimmedDraft = draft.trim();
+  const suggesting = trimmedDraft.length > 0 && trimmedDraft !== state.query;
   function search(value: string) {
     router.setParams({ q: value, page: '1' });
   }
@@ -168,16 +175,31 @@ export function SearchScreen() {
         <Text accessibilityRole="header" className="text-2xl font-bold text-foreground">
           Search
         </Text>
-        <SearchForm key={query} initialQuery={query} onSearch={search} />
+        <SearchForm draft={draft} setDraft={setDraft} onSearch={search} />
         <MediaTypeTabs
           options={types}
-          value={type}
+          value={state.type}
           onChange={selectType}
           label="Search media type"
         />
       </View>
-      <SearchBody input={state} onPage={page} />
+      {suggesting ? (
+        <SearchSuggestions
+          draft={draft}
+          submit={() => {
+            Keyboard.dismiss();
+            search(trimmedDraft);
+          }}
+        />
+      ) : (
+        <SearchBody input={state} onPage={page} />
+      )}
       <BottomNavigation />
     </SafeAreaView>
   );
+}
+
+export function SearchScreen() {
+  const params = useLocalSearchParams();
+  return <SearchContent key={readSearchState(params).query} />;
 }

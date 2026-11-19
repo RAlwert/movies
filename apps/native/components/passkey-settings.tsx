@@ -1,16 +1,26 @@
-import { passkeyNameSchema, formatPasskeyDate, type PasskeyMetadata } from '@movies/api/passkeys';
+import {
+  PASSKEY_NAME_FORMS,
+  runPasskeyCall,
+  type PasskeyNameForm,
+  type PasskeyResult,
+  deviceTypeLabel,
+  formatPasskeyDate,
+  passkeyFailureMessage,
+  passkeyNameSchema,
+  type PasskeyMetadata,
+} from '@movies/api/passkeys';
 import { ScreenQueryState } from '@native/components/screen-query-state';
-import { accountQueryKey } from '@native/lib/account-query-key';
+import { Sheet } from '@native/components/sheet';
+import { passkeyKey, usePasskeys } from '@native/hooks/use-passkeys-query';
 import { queryClient } from '@native/lib/api';
 import { authClient } from '@native/lib/auth-client';
-import { addDevicePasskey, isPasskeySupported, readPasskeys } from '@native/lib/passkeys';
+import { addDevicePasskey, isPasskeySupported } from '@native/lib/passkeys';
 import { isUnauthorized, SETTINGS_LOGIN_HREF } from '@native/lib/settings-session';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { Redirect, useFocusEffect } from 'expo-router';
-import { useState, useCallback } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { Redirect } from 'expo-router';
+import { useState } from 'react';
 import {
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -20,53 +30,43 @@ import {
 } from 'react-native';
 import { SafeAreaView as NativeSafeAreaView } from 'react-native-safe-area-context';
 import { withUniwind } from 'uniwind';
+
 const SafeAreaView = withUniwind(NativeSafeAreaView);
 
 function passkeyName(key: PasskeyMetadata) {
   return key.name || 'Unnamed passkey';
 }
-function passkeyKey(userId: string) {
-  return accountQueryKey(['passkeys'], userId);
-}
+
 async function refresh(userId: string) {
   await queryClient.invalidateQueries({ queryKey: passkeyKey(userId) });
 }
-function registrationMessage(error: unknown) {
-  if (typeof error === 'object' && error !== null && 'code' in error) {
-    if (
-      [
-        'PASSKEY_CANCELLED',
-        'ERROR_CEREMONY_ABORTED',
-        'REGISTRATION_CANCELLED',
-        'AUTH_CANCELLED',
-      ].includes(String(error.code))
-    ) {
-      return 'Passkey setup was cancelled. You can try again.';
-    }
-  }
-  return 'Couldn’t add your passkey. Please try again.';
-}
 
-function AddPasskey({ userId, close }: { userId: string; close: () => void }) {
-  const [name, setName] = useState('My Passkey');
+type NameSheetProps = {
+  form: PasskeyNameForm;
+  initialName?: string;
+  save: (name: string) => Promise<PasskeyResult>;
+  close: () => void;
+};
+
+/** Sheet with a single passkey-name field, shared by adding and renaming. */
+function PasskeyNameSheet({ form, initialName = form.initialName, save, close }: NameSheetProps) {
+  const [name, setName] = useState(initialName);
   const [error, setError] = useState<string | null>(null);
-  const save = useMutation({
-    async mutationFn(value: string) {
-      const result = await addDevicePasskey(value);
-      if (result.error) {
-        throw new Error(registrationMessage(result.error));
+  const mutation = useMutation({
+    mutationFn: save,
+    onSuccess(result) {
+      if (result.ok) {
+        close();
+      } else {
+        setError(passkeyFailureMessage(result.reason, form.failureMessage));
       }
-    },
-    async onSuccess() {
-      await refresh(userId);
-      close();
     },
     onError(error) {
       setError(error.message);
     },
   });
   function dismiss() {
-    if (!save.isPending) {
+    if (!mutation.isPending) {
       close();
     }
   }
@@ -77,10 +77,10 @@ function AddPasskey({ userId, close }: { userId: string; close: () => void }) {
       return;
     }
     setError(null);
-    save.mutate(parsed.data);
+    mutation.mutate(parsed.data);
   }
   return (
-    <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={dismiss}>
+    <Sheet visible onRequestClose={dismiss}>
       <SafeAreaView className="flex-1 bg-background">
         <KeyboardAvoidingView
           className="flex-1"
@@ -91,21 +91,20 @@ function AddPasskey({ userId, close }: { userId: string; close: () => void }) {
             keyboardShouldPersistTaps="handled"
           >
             <Text accessibilityRole="header" className="text-xl font-bold text-foreground">
-              Add New Passkey
+              {form.title}
             </Text>
-            <Text className="text-muted">
-              Give your passkey a name to help you identify it later. This could be the device name
-              or location.
-            </Text>
+            <Text className="text-muted">{form.description}</Text>
             <Text className="font-semibold text-foreground">Passkey Name</Text>
             <TextInput
               accessibilityLabel="Passkey Name"
               value={name}
               onChangeText={setName}
               maxLength={100}
-              editable={!save.isPending}
+              editable={!mutation.isPending}
               placeholder="e.g., MacBook Pro, iPhone, YubiKey"
               placeholderTextColorClassName="accent-muted"
+              returnKeyType="done"
+              onSubmitEditing={submit}
               className="min-h-12 rounded-xl border border-border px-4 text-foreground"
             />
             {error ? (
@@ -115,20 +114,20 @@ function AddPasskey({ userId, close }: { userId: string; close: () => void }) {
             ) : null}
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Confirm Add Passkey"
-              disabled={save.isPending}
-              accessibilityState={{ disabled: save.isPending }}
+              accessibilityLabel={'Confirm ' + form.action}
+              disabled={mutation.isPending}
+              accessibilityState={{ disabled: mutation.isPending }}
               className="min-h-12 items-center justify-center rounded-xl bg-foreground px-4"
               onPress={submit}
             >
               <Text className="font-semibold text-background">
-                {save.isPending ? 'Adding…' : 'Add Passkey'}
+                {mutation.isPending ? form.pendingLabel : form.submitLabel}
               </Text>
             </Pressable>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Cancel Add Passkey"
-              disabled={save.isPending}
+              accessibilityLabel={'Cancel ' + form.action}
+              disabled={mutation.isPending}
               className="bg-default min-h-12 items-center justify-center rounded-xl px-4"
               onPress={dismiss}
             >
@@ -137,9 +136,49 @@ function AddPasskey({ userId, close }: { userId: string; close: () => void }) {
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
-    </Modal>
+    </Sheet>
   );
 }
+
+function AddPasskey({ userId, close }: { userId: string; close: () => void }) {
+  async function save(name: string) {
+    const result = await runPasskeyCall('add passkey', () => addDevicePasskey(name));
+    if (result.ok) {
+      await refresh(userId);
+    }
+    return result;
+  }
+  return <PasskeyNameSheet form={PASSKEY_NAME_FORMS.add} save={save} close={close} />;
+}
+
+function RenamePasskey({
+  item,
+  userId,
+  close,
+}: {
+  item: PasskeyMetadata;
+  userId: string;
+  close: () => void;
+}) {
+  async function save(name: string) {
+    const result = await runPasskeyCall('rename passkey', () =>
+      authClient.passkey.updatePasskey({ id: item.id, name }),
+    );
+    if (result.ok) {
+      await refresh(userId);
+    }
+    return result;
+  }
+  return (
+    <PasskeyNameSheet
+      form={PASSKEY_NAME_FORMS.rename}
+      initialName={item.name ?? ''}
+      save={save}
+      close={close}
+    />
+  );
+}
+
 function DeletePasskey({
   item,
   userId,
@@ -167,7 +206,7 @@ function DeletePasskey({
     }
   }
   return (
-    <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={dismiss}>
+    <Sheet visible onRequestClose={dismiss}>
       <SafeAreaView className="flex-1 justify-center bg-background p-5">
         <View className="gap-5 rounded-xl border border-border p-5">
           <Text accessibilityRole="header" className="text-xl font-bold text-foreground">
@@ -203,16 +242,46 @@ function DeletePasskey({
           </Pressable>
         </View>
       </SafeAreaView>
-    </Modal>
+    </Sheet>
   );
 }
-function PasskeyRows({
-  items,
-  remove,
-}: {
-  items: PasskeyMetadata[];
+
+type ItemActions = {
+  rename: (item: PasskeyMetadata) => void;
   remove: (item: PasskeyMetadata) => void;
-}) {
+};
+
+function PasskeyRow({ item, rename, remove }: { item: PasskeyMetadata } & ItemActions) {
+  const name = passkeyName(item);
+  return (
+    <View className="gap-3 rounded-xl border border-border p-4">
+      <Text className="font-semibold text-foreground">{name}</Text>
+      <Text className="text-sm text-foreground/75">
+        {deviceTypeLabel(item.deviceType)} · Created: {formatPasskeyDate(item.createdAt)}
+      </Text>
+      <View className="flex-row gap-3">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={'Rename passkey ' + name}
+          className="min-h-12 flex-1 items-center justify-center rounded-lg border border-border px-4"
+          onPress={() => rename(item)}
+        >
+          <Text className="font-semibold text-foreground">Rename</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={'Delete passkey ' + name}
+          className="min-h-12 flex-1 items-center justify-center rounded-lg bg-red-700 px-4"
+          onPress={() => remove(item)}
+        >
+          <Text className="font-semibold text-white">Delete</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function PasskeyRows({ items, ...actions }: { items: PasskeyMetadata[] } & ItemActions) {
   if (items.length === 0) {
     return (
       <Text className="text-sm text-foreground/75">
@@ -223,38 +292,14 @@ function PasskeyRows({
   return (
     <View className="gap-3">
       {items.map((item) => (
-        <View key={item.id} className="gap-3 rounded-xl border border-border p-4">
-          <Text className="font-semibold text-foreground">{passkeyName(item)}</Text>
-          <Text className="text-sm text-foreground/75">
-            {item.deviceType} · Created: {formatPasskeyDate(item.createdAt)}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={'Delete passkey ' + passkeyName(item)}
-            className="min-h-12 items-center justify-center rounded-lg bg-red-700 px-4"
-            onPress={() => remove(item)}
-          >
-            <Text className="font-semibold text-white">Delete</Text>
-          </Pressable>
-        </View>
+        <PasskeyRow key={item.id} item={item} {...actions} />
       ))}
     </View>
   );
 }
-function PasskeyData({
-  userId,
-  remove,
-}: {
-  userId: string;
-  remove: (item: PasskeyMetadata) => void;
-}) {
-  const query = useQuery({ queryKey: passkeyKey(userId), queryFn: readPasskeys, retry: false });
-  const { refetch } = query;
-  useFocusEffect(
-    useCallback(() => {
-      void refetch();
-    }, [refetch]),
-  );
+
+function PasskeyData({ userId, ...actions }: { userId: string } & ItemActions) {
+  const query = usePasskeys(userId);
   if (isUnauthorized(query.error)) {
     return <Redirect href={SETTINGS_LOGIN_HREF} />;
   }
@@ -269,11 +314,35 @@ function PasskeyData({
       />
     );
   }
-  return <PasskeyRows items={query.data} remove={remove} />;
+  return <PasskeyRows items={query.data} {...actions} />;
 }
+
+type ActiveSheet =
+  | { kind: 'add' }
+  | { kind: 'rename'; item: PasskeyMetadata }
+  | { kind: 'delete'; item: PasskeyMetadata };
+
+function PasskeySheet({
+  sheet,
+  userId,
+  close,
+}: {
+  sheet: ActiveSheet;
+  userId: string;
+  close: () => void;
+}) {
+  switch (sheet.kind) {
+    case 'add':
+      return <AddPasskey userId={userId} close={close} />;
+    case 'rename':
+      return <RenamePasskey item={sheet.item} userId={userId} close={close} />;
+    case 'delete':
+      return <DeletePasskey item={sheet.item} userId={userId} close={close} />;
+  }
+}
+
 export function PasskeySettings({ userId }: { userId: string }) {
-  const [adding, setAdding] = useState(false);
-  const [deleting, setDeleting] = useState<PasskeyMetadata | null>(null);
+  const [sheet, setSheet] = useState<ActiveSheet | null>(null);
   const supported = isPasskeySupported();
   return (
     <View className="gap-4 rounded-xl border border-border p-4">
@@ -290,7 +359,7 @@ export function PasskeySettings({ userId }: { userId: string }) {
         disabled={!supported}
         accessibilityState={{ disabled: !supported }}
         className="min-h-12 items-center justify-center rounded-xl bg-foreground px-4"
-        onPress={() => setAdding(true)}
+        onPress={() => setSheet({ kind: 'add' })}
       >
         <Text className="font-semibold text-background">Add Passkey</Text>
       </Pressable>
@@ -299,11 +368,12 @@ export function PasskeySettings({ userId }: { userId: string }) {
           Passkeys can’t be created here. You can still manage existing passkeys.
         </Text>
       ) : null}
-      <PasskeyData userId={userId} remove={setDeleting} />
-      {adding ? <AddPasskey userId={userId} close={() => setAdding(false)} /> : null}
-      {deleting ? (
-        <DeletePasskey item={deleting} userId={userId} close={() => setDeleting(null)} />
-      ) : null}
+      <PasskeyData
+        userId={userId}
+        rename={(item) => setSheet({ kind: 'rename', item })}
+        remove={(item) => setSheet({ kind: 'delete', item })}
+      />
+      {sheet ? <PasskeySheet sheet={sheet} userId={userId} close={() => setSheet(null)} /> : null}
     </View>
   );
 }

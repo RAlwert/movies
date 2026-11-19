@@ -10,16 +10,11 @@ import { unstable_noStore as noStore } from 'next/cache';
 import { redirect } from 'next/navigation';
 
 import { getUser } from '@/lib/auth-server';
-import {
-  getAllWatchProviders,
-  getUserRegion,
-  getUserWatchProviders,
-  updateUserRegion,
-} from '@/lib/user-actions';
+import { getAllWatchProviders, getUserRegion, getUserWatchProviders } from '@/lib/user-actions';
 
 import { AddPasskey } from './add-passkey';
 import { LinkAccount } from './link-account';
-import { getUserPasskeys } from './passkey-actions';
+import { getUserPasskeys } from './passkey-data';
 import { PasskeyList } from './passkey-list';
 import { RegionForm } from './region-form';
 import { WatchProviderForm } from './watch-provider-form';
@@ -95,12 +90,7 @@ export default async function SettingsPage(props: SettingsPageProps) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <RegionForm
-            key={currentRegion}
-            currentRegion={currentRegion}
-            regions={regions}
-            updateRegionAction={updateUserRegion}
-          />
+          <RegionForm key={currentRegion} currentRegion={currentRegion} regions={regions} />
         </CardContent>
       </Card>
 

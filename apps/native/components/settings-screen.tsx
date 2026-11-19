@@ -1,3 +1,8 @@
+import { accountQueryKey } from '@movies/api/account-query-key';
+import {
+  usePreferencesSetRegionMutation,
+  useAccountRegion,
+} from '@movies/api/react/use-preferences-query';
 import { getRegionByCode, type RegionCode } from '@movies/config/regions';
 import { BottomNavigation } from '@native/components/bottom-navigation';
 import { ChevronDownIcon } from '@native/components/icons';
@@ -9,13 +14,11 @@ import { RegionPicker } from '@native/components/region-picker';
 import { SettingsSaveButton, SettingsSaveFeedback } from '@native/components/settings-controls';
 import { orpc, queryClient } from '@native/lib/api';
 import { authClient } from '@native/lib/auth-client';
-import { accountRegionQueryKey, accountRegionQueryOptions } from '@native/lib/preferences';
 import {
   commitSavedSetting,
   isUnauthorized,
   SETTINGS_LOGIN_HREF,
 } from '@native/lib/settings-session';
-import { useMutation, useQuery } from '@tanstack/react-query';
 import { Redirect } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
@@ -27,14 +30,12 @@ const SafeAreaView = withUniwind(NativeSafeAreaView);
 function RegionForm({ currentRegion, userId }: { currentRegion: RegionCode; userId: string }) {
   const [draft, setDraft] = useState<RegionCode | null>(null);
   const selected = draft ?? currentRegion;
-  const regionKey = accountRegionQueryKey(userId);
-  const save = useMutation(
-    orpc.preferences.setRegion.mutationOptions({
-      async onSuccess(result) {
-        await commitSavedSetting(queryClient, regionKey, result, () => setDraft(null));
-      },
-    }),
-  );
+  const regionKey = accountQueryKey(orpc.preferences.region.queryKey(), userId);
+  const save = usePreferencesSetRegionMutation({
+    async onSuccess(result) {
+      await commitSavedSetting(queryClient, regionKey, result, () => setDraft(null));
+    },
+  });
   const disabled = save.isPending || selected === currentRegion;
   function chooseRegion(region: RegionCode) {
     setDraft(region);
@@ -126,7 +127,7 @@ function RegionReadError({ error, retry }: { error: Error; retry: () => void }) 
 }
 
 function RegionSettings({ userId, anonymous }: { userId: string; anonymous: boolean }) {
-  const query = useQuery(accountRegionQueryOptions(userId, { retry: false }));
+  const query = useAccountRegion(userId);
   if (query.isPending) {
     return <SectionSkeleton label="Loading region settings" />;
   }

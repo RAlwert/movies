@@ -1,3 +1,9 @@
+import { canReorderList } from '@movies/api/list-order';
+import { useAccountRegion } from '@movies/api/react/use-preferences-query';
+import {
+  useSystemListsMoveMutation,
+  useSystemListsPage,
+} from '@movies/api/react/use-system-lists-query';
 import {
   SYSTEM_LIST_COPY,
   SYSTEM_LIST_MEDIA,
@@ -12,21 +18,21 @@ import { MediaPoster } from '@native/components/media-poster';
 import { ScreenQueryState } from '@native/components/screen-query-state';
 import { ScrollNavigationProvider } from '@native/components/scroll-navigation';
 import { SystemListFilters } from '@native/components/system-list-filters';
-import { accountQueryKey } from '@native/lib/account-query-key';
-import { orpc, queryClient } from '@native/lib/api';
-import { canReorderList } from '@native/lib/list-page-state';
-import { accountRegionQueryOptions } from '@native/lib/preferences';
 import { readSystemListState } from '@native/lib/system-list-state';
+import { useCanonicalListPage } from '@native/lib/use-canonical-list-page';
 import { useRememberedScroll } from '@native/lib/use-remembered-scroll';
-import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, type ReactNode } from 'react';
 import { FlatList, Pressable, Text, View } from 'react-native';
 
 type Entry = SystemListPage['items'][number];
+
+const mediaTabs = ['movie', 'tv'] as const;
+
 function title(listType: SystemListType) {
   return SYSTEM_LIST_COPY[listType].title;
 }
+
 function itemKey(item: Entry) {
   return item.listItemId;
 }
@@ -105,7 +111,7 @@ function ListHeader({
       </Text>
       <Text className="text-muted">{listCountCaption(input, result)}</Text>
       <View className="flex-row gap-2">
-        {(['movie', 'tv'] as const).map((type) => (
+        {mediaTabs.map((type) => (
           <Pressable
             key={type}
             accessibilityRole="button"
@@ -241,15 +247,7 @@ function ListGrid({
     captureBeforeNavigation,
     cancelBeforeNavigation,
   } = useRememberedScroll<FlatList<Entry>>('system-list:' + userId + JSON.stringify(input));
-  const move = useMutation(
-    orpc.systemLists.move.mutationOptions({
-      async onSuccess() {
-        await queryClient.invalidateQueries({
-          queryKey: accountQueryKey(orpc.systemLists.key(), userId),
-        });
-      },
-    }),
-  );
+  const move = useSystemListsMoveMutation();
   const reorderDisabled = !canReorderList(input, result, stale);
   const offset = (result.currentPage - 1) * result.itemsPerPage;
   return (
@@ -325,24 +323,16 @@ function ListQuery({
   userId: string;
   change: (params: Record<string, string>) => void;
 }) {
-  const query = useQuery({
-    ...orpc.systemLists.page.queryOptions({ input, retry: false }),
-    placeholderData: keepPreviousData,
-    queryKey: accountQueryKey(orpc.systemLists.page.queryKey({ input }), userId),
-  });
+  const query = useSystemListsPage(userId, input);
+  useCanonicalListPage(query, input.page);
+  function retry() {
+    void query.refetch();
+  }
   if (query.isPending) {
     return <PosterGridSkeleton label="Loading your list" />;
   }
   if (query.isError) {
-    return (
-      <ScreenQueryState
-        label="your list"
-        failed={query.isError}
-        retry={() => {
-          void query.refetch();
-        }}
-      />
-    );
+    return <ScreenQueryState label="your list" failed retry={retry} />;
   }
   return (
     <ListGrid
@@ -351,15 +341,13 @@ function ListQuery({
       userId={userId}
       change={change}
       stale={query.isFetching}
-      retry={() => {
-        void query.refetch();
-      }}
+      retry={retry}
     />
   );
 }
 
 function RegionalList({ listType, userId }: { listType: SystemListType; userId: string }) {
-  const region = useQuery(accountRegionQueryOptions(userId, { retry: false }));
+  const region = useAccountRegion(userId);
   const params = useLocalSearchParams();
   const router = useRouter();
   if (!region.data) {

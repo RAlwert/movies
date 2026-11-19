@@ -28,7 +28,7 @@ import { getUser } from '@/lib/auth-server';
 import { getImdbRating } from '@/lib/imdb';
 import { getMediaCertification } from '@/lib/media-info';
 import { getMovieDetails, getMovieRecommendations, getMovieSimilar } from '@/lib/movies';
-import { getSystemListMemberships } from '@/lib/system-list-queries';
+import { getSystemListMemberships } from '@/lib/system-list-memberships';
 import { optional } from '@/lib/tmdb';
 import { getUserRegion } from '@/lib/user-actions';
 

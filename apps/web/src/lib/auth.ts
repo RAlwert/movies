@@ -9,22 +9,27 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { nextCookies } from 'better-auth/next-js';
 import { anonymous } from 'better-auth/plugins';
 
-import { env } from '@/env';
+import { ENV } from '@/env';
 import { db } from '@/lib/db';
+import { APP_NAME, passkeyOptions } from '@/lib/passkey-options';
 import { passkeyOrigins } from '@/lib/passkey-origins';
 
+const isDevelopment = process.env.NODE_ENV === 'development';
+
+function deploymentOrigin(host: string | undefined) {
+  return host ? `https://${host}` : undefined;
+}
+
 export const auth = betterAuth({
-  baseURL: env.NEXT_PUBLIC_BASE_URL,
+  appName: APP_NAME,
+  baseURL: ENV.NEXT_PUBLIC_BASE_URL,
   advanced: { ipAddress: { ipAddressHeaders: [AUTH_CLIENT_IP_HEADER, 'x-real-ip'] } },
   trustedOrigins: async (request) =>
     [
-      env.BETTER_AUTH_TRUSTED_ORIGIN,
-      env.VERCEL_BRANCH_URL,
-      env.VERCEL_PROJECT_PRODUCTION_URL,
-      ...nativeTrustedOrigins(
-        process.env.NODE_ENV === 'development',
-        request?.headers.get('origin'),
-      ),
+      ENV.BETTER_AUTH_TRUSTED_ORIGIN,
+      deploymentOrigin(ENV.VERCEL_BRANCH_URL),
+      deploymentOrigin(ENV.VERCEL_PROJECT_PRODUCTION_URL),
+      ...nativeTrustedOrigins(isDevelopment, request?.headers.get('origin')),
     ].filter((domain) => domain != null),
   database: drizzleAdapter(db, {
     provider: 'pg',
@@ -44,16 +49,16 @@ export const auth = betterAuth({
   rateLimit: {
     // Mirrors better-auth's default (on in production only), with an env
     // escape hatch for e2e runs where every sign-in comes from one IP.
-    enabled: process.env.NODE_ENV === 'production' && !env.AUTH_RATE_LIMIT_DISABLED,
+    enabled: process.env.NODE_ENV === 'production' && !ENV.AUTH_RATE_LIMIT_DISABLED,
   },
   socialProviders: {
     discord: {
-      clientId: env.DISCORD_CLIENT_ID,
-      clientSecret: env.DISCORD_CLIENT_SECRET,
+      clientId: ENV.DISCORD_CLIENT_ID,
+      clientSecret: ENV.DISCORD_CLIENT_SECRET,
     },
     github: {
-      clientId: env.GITHUB_CLIENT_ID,
-      clientSecret: env.GITHUB_CLIENT_SECRET,
+      clientId: ENV.GITHUB_CLIENT_ID,
+      clientSecret: ENV.GITHUB_CLIENT_SECRET,
     },
   },
 
@@ -69,11 +74,11 @@ export const auth = betterAuth({
       },
     }),
     passkey({
-      rpName: 'Movies',
+      ...passkeyOptions,
       origin: passkeyOrigins(
-        env.NEXT_PUBLIC_BASE_URL,
-        env.PASSKEY_ANDROID_FINGERPRINTS,
-        process.env.NODE_ENV === 'development',
+        ENV.NEXT_PUBLIC_BASE_URL,
+        ENV.PASSKEY_ANDROID_FINGERPRINTS,
+        isDevelopment,
       ),
     }),
     nextCookies(),

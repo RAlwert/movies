@@ -17,7 +17,8 @@ export function isReviewExpandable(content: string) {
 }
 
 export function reviewCountLabel(count: number) {
-  return count.toLocaleString('en-US') + (count === 1 ? ' review' : ' reviews');
+  const noun = count === 1 ? 'review' : 'reviews';
+  return `${count.toLocaleString('en-US')} ${noun}`;
 }
 
 export function readReviewsInput(params: SearchParams) {

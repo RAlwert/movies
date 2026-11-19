@@ -51,7 +51,7 @@ The native and API apps follow the reference project's Varlock pattern. Each app
 
 Expo's Varlock Babel and Metro integrations validate the native schema and inline only public values. The API loads `varlock/auto-load` at its entrypoint before reading `ENV`, validating secrets and coercing the port at startup. The native schema contains only public settings; the API token remains server-only. Empty optional URL overrides retain automatic host detection. Explicit overrides must be HTTP(S) URLs; API browser origins must not include paths, queries or fragments. `PORT` defaults to 3001 and must be an integer from 1 to 65535.
 
-The existing web app and cron scripts retain T3 Env validation during the incremental migration. Their validated optional TMDB URL is passed into the shared transport, which has no environment-loading side effects.
+Web now uses its own Varlock schema and generated `ENV`, like native and Hono. Standalone cron scripts retain their separate T3 Env validator. Their validated optional TMDB URL is passed into the shared transport, which has no environment-loading side effects.
 
 ## API boundary
 
@@ -142,3 +142,11 @@ Native uses Expo SDK 58 and its compatible React Native 0.88 module versions. Re
 The Expo 58 Hermes export exposed oRPC async rest/destructured parameters that the compiler rejected. Explicit Babel parameter/destructuring transforms retain the existing protocol while emitting compatible syntax; web/iOS/Android exports pass with that configuration. Do not remove these transforms without checking the native Hermes exports.
 
 SDK 57 native binaries cannot receive this SDK 58 upgrade as a JavaScript-only update. Install an SDK 58-compatible Expo Go for supported development workflows, or rebuild the development/preview binary with the matching native modules. Signed passkeys still require a custom signed build and the real domain/signing associations.
+
+### Query hooks
+
+Product queries and mutations belong in the shared `packages/api/src/react/use-<domain>-query.ts` modules, imported directly from `@movies/api/react/use-<domain>-query` by both apps. `ApiProvider` supplies each platform’s transport and current account. Screens and components consume named hooks such as `useCatalogDetails(input)` and `useCustomListsDetails(userId, input)`. Hooks own oRPC query options, account-scoped keys, retry policy and pagination placeholders, and return the React Query result directly. Keep rendering, route state and form drafts in components. Input types derive from the shared API client contract. Existing region/session hooks in `lib/preferences.ts` retain their session-store behavior. Better Auth/passkey hooks stay platform-specific because browser and secure native authentication use different clients. See [the shared API architecture](../../docs/shared-api.md).
+
+### Babel configuration
+
+`babel.config.mjs` uses ESM imports and a default export. The pinned Node 24 runtime supports loading this synchronous ESM configuration from Metro. Keep it free of top-level await. Preserve the explicit parameter/destructuring transforms and verify web/iOS/Android exports when changing the config; Hermes requires those transforms for oRPC.

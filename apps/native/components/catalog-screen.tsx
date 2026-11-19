@@ -1,11 +1,11 @@
 import { catalogDetailInput, parseCatalogId, type CatalogDetailInput } from '@movies/api/catalog';
+import { hasErrorCode } from '@movies/api/errors';
+import { useCatalogDetails } from '@movies/api/react/use-catalog-query';
 import { regionSchema } from '@movies/config/regions';
 import { BottomNavigation } from '@native/components/bottom-navigation';
 import { CatalogContent } from '@native/components/catalog-content';
 import { DetailSkeleton } from '@native/components/loading-skeletons';
-import { orpc } from '@native/lib/api';
 import { useRegion } from '@native/lib/preferences';
-import { useQuery } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 import { SafeAreaView as NativeSafeAreaView } from 'react-native-safe-area-context';
@@ -32,7 +32,7 @@ function TitleNotFound() {
   );
 }
 function TitleLoadError({ error, retry }: { error: Error; retry: () => void }) {
-  if ('code' in error && error.code === 'NOT_FOUND') {
+  if (hasErrorCode(error, 'NOT_FOUND')) {
     return <TitleNotFound />;
   }
   return (
@@ -42,9 +42,7 @@ function TitleLoadError({ error, retry }: { error: Error; retry: () => void }) {
       <Pressable
         accessibilityRole="button"
         className="bg-default rounded-lg px-4 py-3"
-        onPress={() => {
-          void retry();
-        }}
+        onPress={retry}
       >
         <Text className="font-semibold text-foreground">Try again</Text>
       </Pressable>
@@ -52,7 +50,7 @@ function TitleLoadError({ error, retry }: { error: Error; retry: () => void }) {
   );
 }
 function CatalogQuery({ input }: { input: CatalogDetailInput }) {
-  const query = useQuery(orpc.catalog.details.queryOptions({ input, retry: false }));
+  const query = useCatalogDetails(input);
   if (query.isPending) {
     return <DetailSkeleton label="Loading title" />;
   }

@@ -27,7 +27,7 @@ import { TvSeasons } from '@/components/tv-seasons';
 import { getUser } from '@/lib/auth-server';
 import { getImdbRating } from '@/lib/imdb';
 import { getMediaCertification } from '@/lib/media-info';
-import { getSystemListMemberships } from '@/lib/system-list-queries';
+import { getSystemListMemberships } from '@/lib/system-list-memberships';
 import { optional } from '@/lib/tmdb';
 import {
   getTvShowDetails,

@@ -1,12 +1,10 @@
+import { useSystemListsOptions } from '@movies/api/react/use-system-lists-query';
 import type { SystemListPageInput } from '@movies/api/system-lists';
 import { ChoiceSheet } from '@native/components/choice-sheet';
 import { ChevronDownIcon } from '@native/components/icons';
 import { RegionPicker } from '@native/components/region-picker';
-import { accountQueryKey } from '@native/lib/account-query-key';
-import { orpc } from '@native/lib/api';
 import { toggleSelection } from '@native/lib/discover-state';
 import { providerChoices } from '@native/lib/provider-choices';
-import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
@@ -21,12 +19,10 @@ export function SystemListFilters({
 }) {
   const [open, setOpen] = useState<'providers' | 'region' | null>(null);
   const optionsInput = { region: input.region };
-  const query = useQuery({
-    ...orpc.systemLists.options.queryOptions({ input: optionsInput, retry: false }),
-    queryKey: accountQueryKey(orpc.systemLists.options.queryKey({ input: optionsInput }), userId),
-  });
+  const query = useSystemListsOptions(userId, optionsInput);
   const choices = providerChoices(query.data ?? [], input.providerIds);
   const blocked = query.isPending || query.isError;
+  const selectedProviders = input.providerIds.map(String);
   return (
     <View className="gap-2">
       <View className="flex-row flex-wrap gap-2">
@@ -66,11 +62,11 @@ export function SystemListFilters({
         <ChoiceSheet
           title="Providers"
           options={choices}
-          selected={input.providerIds.map(String)}
+          selected={selectedProviders}
           multiple
           onSelect={(value) =>
             change({
-              with_watch_providers: toggleSelection(input.providerIds.map(String), value).join('|'),
+              with_watch_providers: toggleSelection(selectedProviders, value).join('|'),
               page: '1',
             })
           }
@@ -97,6 +93,7 @@ function ClearProviders({ count, clear }: { count: number; clear: () => void }) 
     </Pressable>
   );
 }
+
 function ProviderError({ failed, retry }: { failed: boolean; retry: () => void }) {
   if (!failed) {
     return null;

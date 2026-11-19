@@ -1,5 +1,6 @@
 import type { DiscoveryInput } from '@movies/api/discover';
 import type { MediaCard } from '@movies/api/home';
+import { useDiscoveryList, useDiscoveryOptions } from '@movies/api/react/use-discovery-query';
 import { BottomNavigation } from '@native/components/bottom-navigation';
 import { DiscoverFacetChips } from '@native/components/discover-facet-chips';
 import { DiscoverFilters } from '@native/components/discover-filters';
@@ -12,13 +13,11 @@ import { MediaPoster } from '@native/components/media-poster';
 import { MediaTypeTabs } from '@native/components/media-type-tabs';
 import { ScreenQueryState } from '@native/components/screen-query-state';
 import { ScrollNavigationProvider } from '@native/components/scroll-navigation';
-import { orpc } from '@native/lib/api';
 import { readDiscoverState } from '@native/lib/discover-state';
 import { hasDiscoverySessionError } from '@native/lib/discovery-session';
 import { useRegion, useProviderPreferences } from '@native/lib/preferences';
 import { combineQueryStates } from '@native/lib/query-state';
 import { useRememberedScroll } from '@native/lib/use-remembered-scroll';
-import { useQuery } from '@tanstack/react-query';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { FlatList, Pressable, Text, View } from 'react-native';
 import { SafeAreaView as NativeSafeAreaView } from 'react-native-safe-area-context';
@@ -38,7 +37,7 @@ function DiscoveryResults({
   input: DiscoveryInput;
   change: (params: Record<string, string>) => void;
 }) {
-  const query = useQuery(orpc.discovery.list.queryOptions({ input }));
+  const query = useDiscoveryList(input);
   const {
     ref,
     onScroll,
@@ -55,7 +54,7 @@ function DiscoveryResults({
     return (
       <ScreenQueryState
         label="discovered titles"
-        failed={query.isError}
+        failed
         retry={() => {
           void query.refetch();
         }}
@@ -123,9 +122,7 @@ function DiscoverContent({ userProviders }: { userProviders: number[] }) {
   const router = useRouter();
   const region = useRegion();
   const input = readDiscoverState(params, region, userProviders);
-  const options = useQuery(
-    orpc.discovery.options.queryOptions({ input: { type: input.type, region: input.region } }),
-  );
+  const options = useDiscoveryOptions({ type: input.type, region: input.region });
   function change(values: Record<string, string>) {
     router.setParams(values);
   }

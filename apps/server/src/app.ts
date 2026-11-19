@@ -1,6 +1,7 @@
 import 'server-only';
-import { appRouter, type AppServices } from '@movies/api/router';
+import { appRouter, type AppServices, type AppContext } from '@movies/api/router';
 import { AUTH_NOT_CONFIGURED } from '@movies/api/session';
+import { verifiedProxyIp } from '@movies/auth/proxy';
 import { isLocalBrowserOrigin } from '@movies/config/native-auth';
 import { RPCHandler } from '@orpc/server/fetch';
 import type { AuthGateway } from '@server/auth-gateway';
@@ -11,23 +12,32 @@ function localOrigin(origin: string) {
   return isLocalBrowserOrigin(origin) ? origin : '';
 }
 
-export function createApp(
-  services: AppServices,
-  origin?: string,
-  middleware: MiddlewareHandler[] = [],
-  auth?: AuthGateway,
-  clientIp?: (context: Context) => string,
-) {
+type AppOptions = {
+  origin?: string;
+  middleware?: MiddlewareHandler[];
+  auth?: AuthGateway;
+  clientIp?: (context: Context) => string;
+  rpcProxySecret?: string;
+  onMutation?: AppContext['onMutation'];
+};
+
+export function createApp(services: AppServices, options: AppOptions = {}) {
+  const { origin, middleware = [], auth, clientIp, rpcProxySecret, onMutation } = options;
+  function rpcClientIp(context: Context) {
+    const forwarded = rpcProxySecret ? verifiedProxyIp(context.req.raw, rpcProxySecret) : undefined;
+    return forwarded ?? clientIp?.(context);
+  }
   const app = new Hono();
   for (const use of middleware) {
     app.use(use);
   }
   const handler = new RPCHandler(appRouter);
+  const corsOrigin = origin ?? localOrigin;
   app.use(
     '/rpc/*',
     cors({
-      origin: origin ?? localOrigin,
-      allowMethods: ['GET', 'POST', 'OPTIONS'],
+      origin: corsOrigin,
+      allowMethods: ['POST', 'OPTIONS'],
       credentials: true,
       allowHeaders: ['Content-Type'],
     }),
@@ -35,7 +45,7 @@ export function createApp(
   app.use(
     '/api/auth/*',
     cors({
-      origin: origin ?? localOrigin,
+      origin: corsOrigin,
       credentials: true,
       allowMethods: ['GET', 'POST', 'OPTIONS'],
       allowHeaders: ['Content-Type', 'expo-origin'],
@@ -54,13 +64,14 @@ export function createApp(
       return c.json({ message: 'Could not reach authentication service' }, 502);
     }
   });
-  app.all('/rpc/*', async (c) => {
+  app.on('POST', '/rpc/*', async (c) => {
     const result = await handler.handle(c.req.raw, {
       prefix: '/rpc',
       context: {
         ...services,
+        onMutation,
         session: auth
-          ? { current: () => auth.current(c.req.raw.headers, clientIp?.(c)) }
+          ? { current: () => auth.current(c.req.raw.headers, rpcClientIp(c)) }
           : undefined,
       },
     });

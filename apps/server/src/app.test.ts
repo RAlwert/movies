@@ -5,11 +5,14 @@ import { describe, expect, it, vi } from 'vite-plus/test';
 function setup() {
   const home = { list: vi.fn().mockResolvedValue([]), trending: vi.fn().mockResolvedValue([]) };
   const catalog = {
+    ...mockServices().catalog,
     extras: vi.fn(),
     season: vi.fn(),
     collection: vi.fn(),
     keyword: vi.fn(),
     imdb: vi.fn(),
+    resolveImdb: vi.fn(),
+    watchLinks: vi.fn(),
     reviews: vi.fn(),
     credits: vi.fn(),
     details: vi.fn(),
@@ -17,7 +20,7 @@ function setup() {
     providers: vi.fn(),
     related: vi.fn(),
   };
-  const app = createApp(mockServices({ home, catalog }), 'http://localhost:8081');
+  const app = createApp(mockServices({ home, catalog }), { origin: 'http://localhost:8081' });
   const client = createTestClient(app);
   return { home, catalog, app, client };
 }

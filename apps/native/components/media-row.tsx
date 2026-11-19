@@ -1,8 +1,7 @@
 import type { HomeMediaSection } from '@movies/api/home';
+import { useHomeList, useHomeTrending } from '@movies/api/react/use-home-query';
 import { PosterRowSkeleton } from '@native/components/loading-skeletons';
 import { MediaPoster, MediaPosterRow } from '@native/components/media-poster';
-import { orpc } from '@native/lib/api';
-import { useQuery } from '@tanstack/react-query';
 import { Pressable, Text, View } from 'react-native';
 
 function RowState({
@@ -19,11 +18,7 @@ function RowState({
   featured?: boolean;
 }) {
   if (pending) {
-    return (
-      <View className={featured ? undefined : 'px-4'}>
-        <PosterRowSkeleton label="Loading titles" featured={featured} />
-      </View>
-    );
+    return <LoadingRow featured={featured} />;
   }
   if (failed) {
     return (
@@ -46,9 +41,7 @@ function RowState({
 }
 
 export function MediaRow({ section, region }: { section: HomeMediaSection; region: string }) {
-  const query = useQuery(
-    orpc.home.list.queryOptions({ input: { category: section.category, region } }),
-  );
+  const { data, isPending, isError, refetch } = useHomeList({ category: section.category, region });
   return (
     <View className="gap-3 py-4">
       <View className="gap-1 px-4">
@@ -61,16 +54,16 @@ export function MediaRow({ section, region }: { section: HomeMediaSection; regio
         <Text className="text-sm text-muted">{section.caption}</Text>
       </View>
       <RowState
-        pending={query.isPending}
-        failed={query.isError}
-        empty={query.data?.length === 0}
+        pending={isPending}
+        failed={isError}
+        empty={data?.length === 0}
         retry={() => {
-          void query.refetch();
+          void refetch();
         }}
       />
-      {query.data && query.data.length > 0 ? (
+      {data && data.length > 0 ? (
         <View className="px-4">
-          <MediaPosterRow items={query.data} />
+          <MediaPosterRow items={data} />
         </View>
       ) : null}
     </View>
@@ -78,19 +71,28 @@ export function MediaRow({ section, region }: { section: HomeMediaSection; regio
 }
 
 export function TrendingCard({ type }: { type: 'movie' | 'tv' }) {
-  const query = useQuery(orpc.home.trending.queryOptions({ input: { type } }));
+  const { data, isPending, isError, refetch } = useHomeTrending({ type });
+  const [item] = data ?? [];
   return (
     <View>
       <RowState
         featured
-        pending={query.isPending}
-        failed={query.isError}
-        empty={query.data?.length === 0}
+        pending={isPending}
+        failed={isError}
+        empty={data?.length === 0}
         retry={() => {
-          void query.refetch();
+          void refetch();
         }}
       />
-      {query.data?.[0] ? <MediaPoster item={query.data[0]} featured /> : null}
+      {item ? <MediaPoster item={item} featured /> : null}
+    </View>
+  );
+}
+
+function LoadingRow({ featured }: { featured: boolean }) {
+  return (
+    <View className={featured ? undefined : 'px-4'}>
+      <PosterRowSkeleton label="Loading titles" featured={featured} />
     </View>
   );
 }
